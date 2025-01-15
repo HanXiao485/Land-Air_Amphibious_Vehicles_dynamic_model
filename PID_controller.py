@@ -25,8 +25,8 @@ class PIDController:
 class MultirotorDynamics:
     def __init__(self, mass=3.18):
         self.mass = mass
-        self.theta = 0  # 俯仰角
-        self.phi = 0    # 横滚角
+        self.pitch = 0  # 俯仰角
+        self.roll = 0    # 横滚角
         self.yaw = 0    # 偏航角
         self.z = 0      # 高度
         self.vz = 0     # 垂直速度
@@ -34,8 +34,8 @@ class MultirotorDynamics:
     def update(self, thrust, moments, dt):
         # 更新飞行器姿态和高度
         pitch_moment, roll_moment, yaw_moment = moments
-        self.theta += pitch_moment * dt
-        self.phi += roll_moment * dt
+        self.pitch += pitch_moment * dt
+        self.roll += roll_moment * dt
         self.yaw += yaw_moment * dt
 
         # 高度更新：F = m * a
@@ -79,11 +79,13 @@ class MultirotorController:
 
         # 返回状态
         return {
-            "theta": self.dynamics.theta,
-            "phi": self.dynamics.phi,
+            "pitch": self.dynamics.pitch,
+            "roll": self.dynamics.roll,
             "yaw": self.dynamics.yaw,
             "z": self.dynamics.z,
         }
+
+
 
 
 # 模拟器
@@ -124,10 +126,10 @@ if __name__ == "__main__":
 
     for step in range(steps):
         output = controller.step(target, state)
-        state = [output["theta"], output["phi"], output["yaw"], output["z"]]
+        state = [output["pitch"], output["roll"], output["yaw"], output["z"]]
 
-        theta_list.append(output["theta"])
-        phi_list.append(output["phi"])
+        theta_list.append(output["pitch"])
+        phi_list.append(output["roll"])
         yaw_list.append(output["yaw"])
         z_list.append(output["z"])
 
