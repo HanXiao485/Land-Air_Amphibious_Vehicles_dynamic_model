@@ -125,7 +125,7 @@ if __name__ == "__main__":
     z_list = []
 
     for step in range(steps):
-        output = controller.step(target, state)
+        output = controller.step(target, state)  # state应该从最终状态得到
         state = [output["pitch"], output["roll"], output["yaw"], output["z"]]
 
         theta_list.append(output["pitch"])

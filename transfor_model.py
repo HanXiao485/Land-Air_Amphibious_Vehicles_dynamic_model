@@ -6,13 +6,13 @@ class TransformerModel:
         self.controllerQ2Ts = controllerQ2Ts
         
     def transform(self, force_totle):
-        # 在这里实现你的前向传播逻辑
+        # 前向传播逻辑
         force_motor_0 = np.dot(self.controllerQ2Ts, force_totle)
         
         return force_motor_0
     
     def adjest_motor(self, force_motor_0):
-        # 在这里实现你的电机调整逻辑
+        # 电机调整逻辑
         adj = np.array([1, -1, 1, -1])
         ThrustToW2Gain = 2133171
         
