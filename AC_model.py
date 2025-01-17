@@ -158,10 +158,63 @@ class Vel2Force_1:
             j = np.transpose(j)
             beta = np.dot(a_2, j)  # 1*1
             beta = beta - c
+            betas.append(np.squeeze(np.array(beta)))
             
-            betas.append(np.array(beta))
-        
         return betas
+    
+
+class Vel2Force_2:
+    def __init__(self, betas, alpha, arm, motor_speed, rh0, omega):
+        self.betas = betas
+        self.alpha = alpha
+        self.arm = arm
+        self.motor_speed = motor_speed
+        self.rh0 = rh0
+        self.omega = omega
+        
+        self.rotor_radius = 0.114
+        self.rotor_Ct = 0.48
+        self.airframe_xy = 0.15
+        
+        motor_speed_0 = motor_speed[:, 0]
+        motor_speed_1 = motor_speed[:, 1]
+        motor_speed_2 = motor_speed[:, 2]
+        motor_speed_3 = motor_speed[:, 3]
+        
+        motor_speed_0 = np.dot(motor_speed_0, np.array([1, 1, 1, 1]))
+        motor_speed_1 = np.dot(motor_speed_1, np.array([1, 1, 1, 1]))
+        motor_speed_2 = np.dot(motor_speed_2, np.array([1, 1, 1, 1]))
+        motor_speed_3 = np.dot(motor_speed_3, np.array([1, 1, 1, 1]))
+        
+        self.motor_speed_list = np.array([motor_speed_0, motor_speed_1, motor_speed_2, motor_speed_3])
+        
+    def compute_3(self):
+        
+        for i in range(0, 4):
+            beta = self.betas[i]
+            bata_0 = beta[0]
+            bata_1 = beta[1]
+            motor_speed = self.motor_speed_list[i]
+            
+            x_1 = math.sin(bata_0)
+            x_2 = math.cos(bata_0)
+            y_1 = math.sin(bata_1)
+            y_2 = math.cos(bata_1)
+            
+            x = -(x_1 * (-y_2))
+            y = y_1 * (-x_2)
+            
+            xy = np.array([x, y])  # 1*2
+            
+            
+            w_1 = (motor_speed*motor_speed) * (self.rotor_Ct*self.rotor_radius**4 * (16 / 3600))  # 需测试
+            w_2 = np.abs(motor_speed) * motor_speed
+            w_3 = math.sin(motor_speed) * (w_2 * -self.rotor_Ct * self.rotor_radius**4 * (16 / 3600) * self.rh0) * self.airframe_xy # 需测试
+            
+            
+            
+        
+        return force, moment
     
         
         
@@ -192,9 +245,11 @@ if __name__ == '__main__':
     omega = np.array([0, 0, 0])
     rh0 = np.array([0, 0, 0])
     motor_speed = np.array([[-4096, 0, 0, 0], [0, 4096, 0, 0], [0, 0, -4096, 0], [0, 0, 0, 4096]])
-    Arm = np.array([-0.15, -0.15, -0.0275])
+    arm = np.array([-0.15, -0.15, -0.0275])
     alpha = np.array([0, 0, 0])
-    vel2force = Vel2Force_1(velocity, omega, rh0, motor_speed, Arm, alpha)
-    z = vel2force.compute_1()
-    x = vel2force.compute_2(z)
-    print(x)
+    Vel2Force_1 = Vel2Force_1(velocity, omega, rh0, motor_speed, arm, alpha)
+    z = Vel2Force_1.compute_1()
+    x = Vel2Force_1.compute_2(z)
+    vel2force_2 = Vel2Force_2(x, alpha, arm, motor_speed, rh0, omega)
+    vel2force_2.compute_3()
+    # print()
