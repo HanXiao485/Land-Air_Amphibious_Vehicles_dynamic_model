@@ -91,6 +91,7 @@ class Vel2Force_1:
         return x0  # 4*3
     
     def compute_2(self, x0):
+        betas = []
         for i in range(0, 4):
             x = x0[i]
             motor_speed_list = self.motor_speed_list[i]
@@ -116,12 +117,6 @@ class Vel2Force_1:
             c = 1 * (16 / self.rotor_lock) / motor_speed_list
             omega_10 = np.array([self.omega[1], self.omega[0]])
             
-            # c_list = []
-            # for i in range(0, 4):
-            #     c_list.append(c[i] * omega_10)
-            #     i = i + 1
-            # c_matrix = np.vstack(c_list)
-            
             c = c * omega_10
             
             # compute_2_3
@@ -140,51 +135,11 @@ class Vel2Force_1:
             a = 1 * a / b
             a_2 = np.array([a, 0])  # 2*1
             
-            betas = []
             j = np.transpose(j)
             beta = np.dot(a_2, j)  # 1*1
             beta = beta - c
             betas.append(np.squeeze(np.array(beta)))
-            
-            # b = (1 / b) - (0.5 * mu)
-            
-            # a = 1 * a / b
-            
-            # a_2 = np.array([a, 0])
-            
-            # # 分解计算R
-            # betas = []
-            # for i in range(0, 4):
-            #     motor_speed_list = self.motor_speed_list[i]
-            #     mu = mu_list[i]
-            #     lc = lc_list[i]
-            #     r = r_list[i]
-                
-            #     a = ((8/3) * self.rotor_theta0 + 2 * self.rotor_theta) - 2*lc
-                
-            #     if mu == 0:
-            #         b = mu
-            #     else:
-            #         b = np.finfo(float).tiny
-                
-            #     b = (1 / b) - (0.5 * mu)
-            #     a = 1 * a / b
-            #     a_2 = np.array([a, 0])  # 2*1
-                
-                
-            #     c = 1 * (16 / self.rotor_lock) / motor_speed_list
-            #     self.omega_1 = self.omega[1]
-            #     self.omega_0 = self.omega[0]
-            #     omega_10 = np.array([self.omega_1, self.omega_0])
-            #     c = c * omega_10  # 2*1
-                
-                
-            #     j = np.transpose(j)
-            #     beta = np.dot(a_2, j)  # 1*1
-            #     beta = beta - c
-            #     betas.append(np.squeeze(np.array(beta)))
-                
-                                  
+                                         
         return betas
     
 
@@ -241,10 +196,10 @@ class Vel2Force_2:
             xy = np.array([x, y_1, y])  # 1*2
             
             
-            w_1 = (motor_speed*motor_speed) * (self.rotor_Ct*self.rotor_radius**4 * (16 / 3600))
+            w_1 = (motor_speed**2) * (self.rotor_Ct*self.rotor_radius**4 * (16 / 3600))
             w_2 = np.abs(motor_speed) * motor_speed
             w_3 = math.sin(self.alpha) * (w_2 * -self.rotor_Ct * self.rotor_radius**4 * (16 / 3600) * self.rh0) * self.airframe_xy
-            w_4 = w_2 * self.rotor_Cq * self.rotor_radius**3 * math.pi * self.rotor_radius**2 * self.rh0
+            w_4 = w_2 * (-self.rotor_Cq) * self.rotor_radius**3 * math.pi * self.rotor_radius**2 * self.rh0
             w_5 = w_1 * self.rh0
             w = np.array([0, 0, w_3+w_4])  # 1*3
             
@@ -300,4 +255,3 @@ if __name__ == '__main__':
     vel2force_2 = Vel2Force_2(x, alpha, arm, motor_speed, rh0, omega)
     vel2force_2.compute_3()
     print(vel2force_2.compute_3())
-    # print()
