@@ -1,5 +1,6 @@
 import numpy as np
 import math
+from environment import Environment
 
 class Gravity_Force:
     def __init__(self, g, DCMbe, mass):
@@ -12,10 +13,10 @@ class Gravity_Force:
         output = np.dot(self.dcmbe, m)
 
         return output
-
-
+    
+    
 class DragCalculator:
-    def __init__(self, density, diameter, velocity, drag_coefficient):
+    def __init__(self, density, velocity, diameter, drag_coefficient):
         self.density = density
         self.diameter = diameter
         self.velocity = velocity
@@ -35,18 +36,18 @@ class DragCalculator:
         return drag
 
 class DragCalculation:
-    def __init__(self, density, diameter, velocity, drag_coefficient):
+    def __init__(self, density, velocity, diameter, drag_coefficient):
         self.density = density
         self.diameter = diameter
         self.velocity = velocity
         self.drag_coefficient = drag_coefficient
 
     def calculate_drag(self):
-        drag_calc = DragCalculator(self.density, self.diameter, self.velocity, self.drag_coefficient)
+        drag_calc = DragCalculator(self.density, self.velocity, self.diameter, self.drag_coefficient)
         # 计算 q
         drag_1 = drag_calc.calculate_drag_0(self.velocity)
         drag_2 = -(np.sign(1, self.velocity))
-        drag = drag_1 + drag_2
+        drag = drag_1 * drag_2
         
         return drag
 
@@ -214,13 +215,123 @@ class Vel2Force_2:
             force.append(force_xyz)
             moment.append(moment_xyz)
         
+        force = np.transpose(np.squeeze(force))
+        moment = np.transpose(np.squeeze(moment))
+        
         return force, moment
     
+    
+class Vel2Force_3:
+    def __init__(self, force, moment):
+        self.force = force
+        self.moment = moment
+        
+    def sum_force(self):
+        motor_force = np.sum(self.force, axis=1)
+        return motor_force
+    
+    def sum_moment(self):
+        matrix_1 = np.array([[0, 0, 1, 0], [0, 1, 0, 0], [1, 0, 0, 0], [0, 0, 0, 1]])
+        matrix_2 = np.array([[-1, 0, 0], [0, 1, 0], [0, 0, 1]])
+
+        motor_moment = np.sum(np.dot(self.moment, matrix_1), axis=1)
+        motor_moment = np.dot(motor_moment, matrix_2)
+        
+        return motor_moment
+
+    
+class Disturb:
+    def __init__(self, m_dis, f_dis, wind):
+        self.m_dis = m_dis
+        self.f_dis = f_dis
+        self.wind = wind
+
+    def moment_dis(self):
+        # 计算扰动
+        moment_dis = self.m_dis * self.wind
+        
+        return moment_dis
+    
+    def force_dis(self):
+        # 计算扰动
+        force_dis = self.f_dis * self.wind
+
+        return force_dis
+    
+
+class Applied_Force:
+    def __init__(self, gravity_force, aerodynamics_force, motor_force):
+        self.gravity_force = gravity_force
+        self.aerodynamics_force = aerodynamics_force
+        self.motor_force = motor_force
+        
+    def sum_force(self):
+        # 计算总力
+        external_force = self.gravity_force + self.aerodynamics_force + self.motor_force
+
+        return external_force
+
+
+class AC_model:
+    def __init__(self, motor_speed, environment, DCM_be, velocity, omega, alpha):
+        self.motor_speed = motor_speed
+        self.environment = environment  # 10*1
+        self.DCM_be = DCM_be
+        self.velocity = velocity
+        self.omega = omega
+        self.alpha = alpha
+        self.arm = np.array([[0.15, -0.15, -0.0275], [0.15, 0.15, -0.0275], [-0.15, 0.15, -0.0275], [-0.15, -0.15, -0.0275]])
+        self.diameter = 0.804
+        
+    def compute(self):
+        gravity_force = Gravity_Force(self.environment[0:3], self.DCM_be, mass=3.18)
+        drag_calculation = DragCalculation(self.environment[6], self.velocity, self.diameter, drag_coefficient=0)
+        vel2force_1 = Vel2Force_1(self.velocity, self.omega, self.environment[6], self.motor_speed, self.arm, self.alpha)
+        vel2force_2 = Vel2Force_2(vel2force_1.compute_1(), self.alpha, self.arm, self.motor_speed, self.environment[6], self.omega)
+        
+        force, moment = vel2force_2.compute_3()
+        vel2force_3 = Vel2Force_3(force, moment)
+        
+        disturb = Disturb(m_dis=1 , f_dis=1 , wind=0)
+        
+        gravity_force = gravity_force.compute()
+        drag_calculation = drag_calculation.calculate_drag()
+        motor_force = vel2force_3.sum_force() + disturb.force_dis() * 0
+        applied_force = Applied_Force(gravity_force, drag_calculation, motor_force)
+        
+        f_cg = applied_force.sum_force()
+        m_cg = vel2force_3.sum_moment() + disturb.moment_dis() * 0
+        
+        return f_cg, m_cg
+        
+        
         
         
         
         
 
+# test all
+if __name__ == '__main__':
+    # motot_speed = 
+    gravity = np.array([0, 0, 9.81])
+    air_temp = 273+15
+    speed_sound = 340
+    pressure = 101.3e3
+    air_density = 1.184
+    magnetic_field = np.array([0, 0, 0])
+    motor_speed = np.array([[-4096, 0, 0, 0], [0, 4096, 0, 0], [0, 0, -4096, 0], [0, 0, 0, 4096]])
+    DCM_be = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+    velocity = np.array([3.558e-306, 0, -2.7e-06])
+    omega = np.array([0, 0, 0])
+    alpha = 0
+    
+    environment = Environment(gravity, air_temp, speed_sound, pressure, air_density, magnetic_field)
+    env = environment.environment()
+    
+    ac_model = AC_model(motor_speed, env, DCM_be, velocity, omega, alpha)
+    
+    print(ac_model.compute())
+    
 
 ## test Gravity_Force
 # if __name__ == '__main__':
@@ -239,19 +350,23 @@ class Vel2Force_2:
 #     drag_calc = DragCalculation(density, diameter, velocity, drag_coefficient)
 #     print(drag_calc.calculate_drag())
 
-# test Vel2Force
-if __name__ == '__main__':
-    velocity = np.array([3.558e-306, 0, -2.7e-06])
-    omega = np.array([0, 0, 0])
-    rh0 = np.array([0, 0, 0])
-    motor_speed = np.array([[-4096, 0, 0, 0], [0, 4096, 0, 0], [0, 0, -4096, 0], [0, 0, 0, 4096]])
-    arm = np.array([[0.15, -0.15, -0.0275], [0.15, 0.15, -0.0275], [-0.15, 0.15, -0.0275], [-0.15, -0.15, -0.0275]])
-    alpha = 0
-    rh0 = 1.29
+
+# # test Vel2Force
+# if __name__ == '__main__':
+#     velocity = np.array([3.558e-306, 0, -2.7e-06])
+#     omega = np.array([0, 0, 0])
+#     rh0 = np.array([0, 0, 0])
+#     motor_speed = np.array([[-4096, 0, 0, 0], [0, 4096, 0, 0], [0, 0, -4096, 0], [0, 0, 0, 4096]])
+#     arm = np.array([[0.15, -0.15, -0.0275], [0.15, 0.15, -0.0275], [-0.15, 0.15, -0.0275], [-0.15, -0.15, -0.0275]])
+#     alpha = 0
+#     rh0 = 1.29
     
-    Vel2Force_1 = Vel2Force_1(velocity, omega, rh0, motor_speed, arm, alpha)
-    z = Vel2Force_1.compute_1()
-    x = Vel2Force_1.compute_2(z)
-    vel2force_2 = Vel2Force_2(x, alpha, arm, motor_speed, rh0, omega)
-    vel2force_2.compute_3()
-    print(vel2force_2.compute_3())
+#     Vel2Force_1 = Vel2Force_1(velocity, omega, rh0, motor_speed, arm, alpha)
+#     z = Vel2Force_1.compute_1()
+#     x = Vel2Force_1.compute_2(z)
+#     vel2force_2 = Vel2Force_2(x, alpha, arm, motor_speed, rh0, omega)
+#     force, moment = vel2force_2.compute_3()
+#     vel2force_3 = Vel2Force_3(force, moment)
+    
+#     print(vel2force_3.sum_force())
+#     print(vel2force_3.sum_moment())
