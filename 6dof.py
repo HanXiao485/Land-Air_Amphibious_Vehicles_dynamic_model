@@ -207,8 +207,8 @@ class RigidBody6DOF:
 # 初始化模型
 mass = 1.5  # 四旋翼的质量 (kg)
 # inertia = [[0.029618, 0.069585, 0], [0.069585, 0.029618, 0], [0, 0, 0.042503]]  # 改进的惯性矩阵 (kg*m^2)
-inertia = [[0.03, 0.070, 0], [0.070, 0.03, 0], [0, 0, 0.04]]  # 改进的惯性矩阵 (kg*m^2)
-# inertia = [[0.03, 0.005, 0], [0.005, 0.03, 0], [0, 0, 0.06]]  # 改进的惯性矩阵 (kg*m^2)
+# inertia = [[0.03, 0.070, 0], [0.070, 0.03, 0], [0, 0, 0.04]]  # 改进的惯性矩阵 (kg*m^2)
+inertia = [[0.03, 0.005, 0], [0.005, 0.03, 0], [0, 0, 0.06]]  # 改进的惯性矩阵 (kg*m^2)
 
 rigid_body = RigidBody6DOF(mass, inertia)
 
@@ -225,7 +225,7 @@ rotation_matrices = []
 # 仿真循环
 for t in range(timesteps):
     # 定义外力和力矩
-    base_force = np.array([0.0, 0.0, 0.0])  # 基础推力 (N)
+    base_force = np.array([0.0, 0.1, 0.0])  # 基础推力 (N)
     base_torque = np.array([0.1, 0.0, 0.0])  # 基础力矩 (Nm)
 
     # 加入空气动力学扰动
@@ -237,7 +237,7 @@ for t in range(timesteps):
     random_force = np.random.uniform(0.0, 0.0, 3)  # 随机扰动力 (N)
     random_torque = np.random.uniform(0.0, 0.0, 3)  # 随机扰动力矩 (Nm)
 
-    forces = base_force #+ drag_force + lift_force + random_force
+    forces = base_force + drag_force + lift_force + random_force
     torques = base_torque + random_torque
 
     # 更新刚体动力学状态
