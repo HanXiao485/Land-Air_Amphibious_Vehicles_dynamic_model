@@ -1,152 +1,199 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-from matplotlib.animation import FuncAnimation
 
-# 飞行器参数
-class Quadcopter:
-    def __init__(self):
-        # 物理参数
-        self.mass = 1.0  # 飞行器质量 (kg)
-        self.arm_length = 0.25  # 电机到重心距离 (m)
-        self.inertia = np.diag([0.005, 0.005, 0.01])  # 转动惯量矩阵 (kg·m²)
-        self.gravity = 9.81  # 重力加速度 (m/s²)
-        self.drag_coefficient = 0.1  # 空气阻力系数
-        
-        # 状态变量
-        self.position = np.zeros(3)  # 位置 (x, y, z)
-        self.velocity = np.zeros(3)  # 速度 (vx, vy, vz)
-        self.orientation = np.zeros(3)  # 欧拉角 (roll, pitch, yaw)
-        self.angular_velocity = np.zeros(3)  # 角速度 (p, q, r)
-        
-        # 输入变量 (电机推力)
-        self.thrusts = np.zeros(4)  # 每个电机的推力
+from transfor_model import TransformerModel
+from environment import Environment
+from AC_model import AC_model
 
-    def dynamics(self, thrusts, dt):
-        # 更新飞行器的动力学状态
-        self.thrusts = thrusts
-        total_thrust = np.sum(thrusts)  # 总推力
-        
-        # 力的计算
-        force = np.array([0, 0, -total_thrust]) + np.array([0, 0, self.mass * self.gravity])
-        drag_force = -self.drag_coefficient * self.velocity  # 空气阻力
-        net_force = force + drag_force
-        acceleration = net_force / self.mass
-        
-        # 力矩的计算
-        torque = np.array([
-            self.arm_length * (thrusts[1] - thrusts[3]),  # roll 力矩
-            self.arm_length * (thrusts[2] - thrusts[0]),  # pitch 力矩
-            0.01 * (thrusts[0] - thrusts[1] + thrusts[2] - thrusts[3])  # yaw 力矩
-        ])
-        angular_acceleration = np.linalg.inv(self.inertia).dot(torque)
-        
-        # 状态更新
-        self.velocity += acceleration * dt
-        self.position += self.velocity * dt
-        self.angular_velocity += angular_acceleration * dt
-        self.orientation += self.angular_velocity * dt
+# PID控制器类
+class PIDController:
+    def __init__(self, kp, ki, kd, dt):
+        self.kp = kp  # 比例增益
+        self.ki = ki  # 积分增益
+        self.kd = kd  # 微分增益
+        self.dt = dt  # 时间步长
 
-    def get_state(self):
+        self.prev_error = 0
+        self.integral = 0
+
+    def compute(self, error):
+        # 计算误差的比例、积分和微分部分
+        self.integral += error * self.dt
+        derivative = (error - self.prev_error) / self.dt
+        output = self.kp * error + self.ki * self.integral + self.kd * derivative
+        self.prev_error = error
+        return output
+
+
+# 飞行器动力学模型
+class MultirotorDynamics:
+    def __init__(self, mass=3.18):
+        self.mass = mass
+        self.pitch = 0  # 俯仰角
+        self.roll = 0    # 横滚角
+        self.yaw = 0    # 偏航角
+        self.z = 0      # 高度
+        self.vz = 0     # 垂直速度
+
+    def update(self, thrust, moments, dt):
+        # 更新飞行器姿态和高度
+        pitch_moment, roll_moment, yaw_moment = moments
+        self.pitch += pitch_moment * dt
+        self.roll += roll_moment * dt
+        self.yaw += yaw_moment * dt
+
+        # 高度更新：F = m * a
+        acceleration = (thrust - self.mass * 9.81) / self.mass
+        self.vz += acceleration * dt
+        self.z += self.vz * dt
+
+
+# 主控制系统
+class MultirotorController:
+    def __init__(self, dt):
+        self.dt = dt
+        # 初始化PID控制器
+        self.pitch_controller = PIDController(kp=0.32, ki=0, kd=0.25, dt=dt)
+        self.roll_controller = PIDController(kp=0.32, ki=0, kd=0.25, dt=dt)
+        self.yaw_controller = PIDController(kp=0.5, ki=0, kd=0.25, dt=dt)
+        self.height_controller = PIDController(kp=5.0, ki=0.0, kd=1.0, dt=dt)
+
+        # 飞行器模型
+        self.dynamics = MultirotorDynamics()
+
+    def step(self, target, state):
+        # 目标值与当前状态
+        target_x, target_y, target_yaw, target_z = target
+        x, y, yaw, z = state
+
+        # 计算误差
+        error_pitch = target_x - x
+        error_roll = target_y - y
+        error_yaw = target_yaw - yaw
+        error_height = target_z - z
+
+        # PID控制输出
+        pitch_moment = self.pitch_controller.compute(error_pitch)
+        roll_moment = self.roll_controller.compute(error_roll)
+        yaw_moment = self.yaw_controller.compute(error_yaw)
+        thrust = self.height_controller.compute(error_height)
+        
+        thrust_all = [thrust, pitch_moment, roll_moment, yaw_moment]  ## pid控制器输出
+
+        # transfor_model
+        transfor_model = TransformerModel(thrust_all, controllerQ2Ts = np.array([[0.25, 0.2483, -1.667, 1.667], [0.25, -0.2483, 1.667, 1.667], [0.25, 0.2483, 1.667, -1.667], [0.25, -0.2483, -1.667, -1.667]]))
+        motor_speed = transfor_model.transform_and_adjest(thrust_all)  ## 四个电机各自转速
+        
+        # AC_model
+        # 三轴力和力矩
+        environment = Environment(gravity = np.array([0, 0, 9.81]), 
+                                  air_temp = 273+15, 
+                                  speed_sound = 340, 
+                                  pressure = 101.3e3, 
+                                  air_density = 1.184, 
+                                  magnetic_field = np.array([0, 0, 0]))
+        env = environment.environment()
+        # AC_model = ACModel(motor_speed, env, DCM_be = np.array([[0, 0, 1], [0, 1, 0], [-1, 0, 0]]), velocity = np.array([0, 0, 0]), omega = np.array([0, 0, 0]), alpha = np.array([0, 0, 0]))
+        ac_model = AC_model(motor_speed, 
+                            env, 
+                            DCM_be = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]]), 
+                            velocity = np.array([3.558e-306, 0, -2.7e-06]), 
+                            omega = np.array([0, 0, 0]), 
+                            alpha = 0)
+        f_cg, m_cg = ac_model.compute()  # 1*3, 1*3 三轴力和力矩
+        
+        # # 更新飞行器状态
+        # self.dynamics.update(thrust, (pitch_moment, roll_moment, yaw_moment), self.dt)
+        
+        # # 更新飞行器状态
+        # self.dynamics.update(f_cg[2], (m_cg[0], m_cg[1], m_cg[2]), self.dt)
+
+        # # 返回状态
+        # return {
+        #     "pitch": self.dynamics.pitch,
+        #     "roll": self.dynamics.roll,
+        #     "yaw": self.dynamics.yaw,
+        #     "z": self.dynamics.z,
+        # }
+        
+        # 返回状态
         return {
-            "position": self.position,
-            "velocity": self.velocity,
-            "orientation": self.orientation,
-            "angular_velocity": self.angular_velocity
+            "pitch": m_cg[0],
+            "roll": m_cg[1],
+            "yaw": m_cg[2],
+            "z": f_cg[2],
         }
 
 
-# 控制器
-class PIDController:
-    def __init__(self, kp, ki, kd):
-        self.kp = kp
-        self.ki = ki
-        self.kd = kd
-        self.integral = np.zeros(3)
-        self.previous_error = np.zeros(3)
-    
-    def compute(self, target, current, dt):
-        error = target - current
-        self.integral += error * dt
-        derivative = (error - self.previous_error) / dt
-        self.previous_error = error
-        return self.kp * error + self.ki * self.integral + self.kd * derivative
 
-
-# 推力分配矩阵
-def compute_motor_thrusts(control_signal, total_thrust):
-    """
-    根据控制信号和总推力计算电机推力
-    :param control_signal: [roll_torque, pitch_torque, yaw_torque]
-    :param total_thrust: 总推力
-    :return: 每个电机的推力
-    """
-    l = 0.25  # 电机到重心的距离 (m)
-    k = 0.01  # 假设的力矩系数
-    allocation_matrix = np.array([
-        [1, -1, -1,  1],  # 前左
-        [1,  1, -1, -1],  # 前右
-        [1,  1,  1,  1],  # 后右
-        [1, -1,  1, -1]   # 后左
-    ]).T
-    torques = np.array([control_signal[0] / l, control_signal[1] / l, control_signal[2] / k, total_thrust])
-    return np.linalg.lstsq(allocation_matrix, torques, rcond=None)[0]
-
-
-# 仿真设置
-def simulate_quadcopter(duration, dt):
-    quad = Quadcopter()
-    controller = PIDController(kp=5.0, ki=0.1, kd=0.5)
-    
-    target_position = np.array([0, 0, -1.0])  # 目标位置
-    positions = []
-    
-    for t in np.arange(0, duration, dt):
-        current_position = quad.position
-        control_signal = controller.compute(target_position, current_position, dt)
-        
-        # 计算推力分配
-        total_thrust = quad.mass * quad.gravity  # 保持悬停的推力
-        thrusts = compute_motor_thrusts(control_signal, total_thrust)
-        thrusts = np.clip(thrusts, 0, 10)  # 限制推力范围
-        
-        quad.dynamics(thrusts, dt)
-        positions.append(quad.position.copy())
-    
-    return np.array(positions)
-
-
-# 绘制3D动画
-def plot_3d_trajectory(positions):
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-    ax.set_xlim(-5, 5)
-    ax.set_ylim(-5, 5)
-    ax.set_zlim(0, 15)
-    ax.set_xlabel("X (m)")
-    ax.set_ylabel("Y (m)")
-    ax.set_zlabel("Z (m)")
-    ax.set_title("Quadcopter Trajectory")
-
-    # 轨迹线和当前点
-    line, = ax.plot([], [], [], lw=2)
-    point, = ax.plot([], [], [], 'ro')
-
-    def update(frame):
-        line.set_data(positions[:frame, 0], positions[:frame, 1])
-        line.set_3d_properties(positions[:frame, 2])
-        point.set_data(positions[frame, 0], positions[frame, 1])
-        point.set_3d_properties(positions[frame, 2])
-        return line, point
-
-    ani = FuncAnimation(fig, update, frames=len(positions), interval=50, blit=False)
-    plt.show()
-
-
-# 主程序
+############################################################################################################################################
+# 模拟器
 if __name__ == "__main__":
-    duration = 10.0  # 仿真时长 (s)
-    dt = 0.01  # 时间步长 (s)
-    positions = simulate_quadcopter(duration, dt)
-    plot_3d_trajectory(positions)
-    print(positions)
+    # 初始化控制系统
+    dt = 0.01  # 时间步长
+    controller = MultirotorController(dt)
+
+    # 目标值和初始状态
+    target = [0.0, 0.0, 0.0, -3.0]  # 目标x, y, yaw, z
+    state = [0.0, 0.0, 0.0, 0.0]    # 初始x, y, yaw, z
+    
+    steps = 1000  # 模拟步数
+    time = np.linspace(0, steps * dt, steps)  # 时间数组
+
+    # 保存飞行器状态
+    theta_list = []
+    phi_list = []
+    yaw_list = []
+    z_list = []
+
+    for step in range(steps):
+        output = controller.step(target, state)  # state应该从最终状态得到
+        state = [output["pitch"], output["roll"], output["yaw"], output["z"]]
+
+        theta_list.append(output["pitch"])
+        phi_list.append(output["roll"])
+        yaw_list.append(output["yaw"])
+        z_list.append(output["z"])
+
+    # 绘制图形
+    plt.figure(figsize=(12, 8))
+
+    # 俯仰角
+    plt.subplot(2, 2, 1)
+    plt.plot(time, theta_list, label="Pitch (Theta)", color="b")
+    plt.xlabel("Time (s)")
+    plt.ylabel("Angle (rad)")
+    plt.title("Pitch Angle Over Time")
+    plt.legend()
+    plt.grid()
+
+    # 横滚角
+    plt.subplot(2, 2, 2)
+    plt.plot(time, phi_list, label="Roll (Phi)", color="g")
+    plt.xlabel("Time (s)")
+    plt.ylabel("Angle (rad)")
+    plt.title("Roll Angle Over Time")
+    plt.legend()
+    plt.grid()
+
+    # 偏航角
+    plt.subplot(2, 2, 3)
+    plt.plot(time, yaw_list, label="Yaw", color="r")
+    plt.xlabel("Time (s)")
+    plt.ylabel("Angle (rad)")
+    plt.title("Yaw Angle Over Time")
+    plt.legend()
+    plt.grid()
+
+    # 高度
+    plt.subplot(2, 2, 4)
+    plt.plot(time, z_list, label="Height (Z)", color="m")
+    plt.xlabel("Time (s)")
+    plt.ylabel("Height (m)")
+    plt.title("Height Over Time")
+    plt.legend()
+    plt.grid()
+
+    plt.tight_layout()
+    plt.show()
+############################################################################################################################################

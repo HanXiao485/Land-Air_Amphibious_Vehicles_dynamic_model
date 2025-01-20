@@ -1,300 +1,219 @@
-# import numpy as np
-# import matplotlib.pyplot as plt
-
-# class RigidBody6DOF:
-#     def __init__(self, mass, inertia):
-#         self.mass = mass  # 质量
-#         self.inertia = np.array(inertia)  # 惯性矩阵 (3x3)
-#         self.inv_inertia = np.linalg.inv(self.inertia)
-
-#         # 状态变量
-#         self.position = np.zeros(3)  # 在世界坐标系中的位置 (m)
-#         self.velocity = np.zeros(3)  # 在世界坐标系中的速度 (m/s)
-#         self.acceleration = np.zeros(3)  # 在世界坐标系中的加速度 (m/s^2)
-
-#         self.orientation = np.eye(3)  # 刚体坐标系相对于世界坐标系的旋转矩阵
-#         self.angular_velocity = np.zeros(3)  # 在刚体坐标系的角速度 (rad/s)
-#         self.angular_acceleration = np.zeros(3)  # 在刚体坐标系的角加速度 (rad/s^2)
-
-#     def apply_forces_and_torques(self, forces, torques, dt):
-#         # 线性动力学
-#         total_force = np.array(forces)  # 总外力
-#         self.acceleration = total_force / self.mass
-#         self.velocity += self.acceleration * dt
-#         self.position += self.velocity * dt
-
-#         # 角动力学
-#         total_torque = np.array(torques)  # 总力矩
-#         self.angular_acceleration = self.inv_inertia @ (
-#             total_torque - np.cross(self.angular_velocity, self.inertia @ self.angular_velocity)
-#         )
-#         self.angular_velocity += self.angular_acceleration * dt
-
-#         # 更新旋转矩阵
-#         angular_velocity_skew = np.array([
-#             [0, -self.angular_velocity[2], self.angular_velocity[1]],
-#             [self.angular_velocity[2], 0, -self.angular_velocity[0]],
-#             [-self.angular_velocity[1], self.angular_velocity[0], 0],
-#         ])
-#         self.orientation += angular_velocity_skew @ self.orientation * dt
-#         self.orientation = self._orthonormalize(self.orientation)
-
-#     def _orthonormalize(self, matrix):
-#         u, _, vh = np.linalg.svd(matrix)
-#         return u @ vh
-
-#     def get_euler_angles(self):
-#         # 从旋转矩阵计算欧拉角 (Z-Y-X 顺序)
-#         sy = np.sqrt(self.orientation[0, 0] ** 2 + self.orientation[1, 0] ** 2)
-#         singular = sy < 1e-6
-
-#         if not singular:
-#             x = np.arctan2(self.orientation[2, 1], self.orientation[2, 2])
-#             y = np.arctan2(-self.orientation[2, 0], sy)
-#             z = np.arctan2(self.orientation[1, 0], self.orientation[0, 0])
-#         else:
-#             x = np.arctan2(-self.orientation[1, 2], self.orientation[1, 1])
-#             y = np.arctan2(-self.orientation[2, 0], sy)
-#             z = 0
-
-#         return np.array([x, y, z])
-
-# # 初始化模型
-# mass = 1.5  # 四旋翼的质量 (kg)
-# inertia = [[0.03, 0, 0], [0, 0.03, 0], [0, 0, 0.06]]  # 惯性矩阵 (kg*m^2)
-# rigid_body = RigidBody6DOF(mass, inertia)
-
-# # 仿真参数
-# dt = 0.01  # 时间步长 (s)
-# simulation_time = 10  # 仿真总时长 (s)
-# timesteps = int(simulation_time / dt)
-
-# # 初始化变量
-# positions, velocities, accelerations = [], [], []
-# euler_angles, angular_velocities, angular_accelerations = [], [], []
-# rotation_matrices = []
-
-# # 仿真循环
-# for t in range(timesteps):
-#     # 定义外力和力矩
-#     forces = [0.0, 0.0, 0.1]  # N
-#     torques = [0.0, 0.0, 0.0]  # Nm
-
-#     # 更新刚体动力学状态
-#     rigid_body.apply_forces_and_torques(forces, torques, dt)
-
-#     # 存储输出
-#     positions.append(rigid_body.position.copy())
-#     velocities.append(rigid_body.velocity.copy())
-#     accelerations.append(rigid_body.acceleration.copy())
-#     euler_angles.append(rigid_body.get_euler_angles())
-#     angular_velocities.append(rigid_body.angular_velocity.copy())
-#     angular_accelerations.append(rigid_body.angular_acceleration.copy())
-#     rotation_matrices.append(rigid_body.orientation.copy())
-
-#     # 打印旋转矩阵
-#     print(f"Time {t*dt:.2f}s - Rotation Matrix:\n{rigid_body.orientation}\n")
-
-# # 转换为 numpy 数组
-# positions = np.array(positions)
-# velocities = np.array(velocities)
-# accelerations = np.array(accelerations)
-# euler_angles = np.array(euler_angles)
-# angular_velocities = np.array(angular_velocities)
-# angular_accelerations = np.array(angular_accelerations)
-
-# # 绘制曲线
-# plt.figure(figsize=(12, 8))
-
-# plt.subplot(3, 2, 1)
-# plt.plot(positions)
-# plt.title("Position (World Frame)")
-# plt.legend(["x", "y", "z"])
-
-# plt.subplot(3, 2, 2)
-# plt.plot(velocities)
-# plt.title("Velocity (World Frame)")
-# plt.legend(["vx", "vy", "vz"])
-
-# plt.subplot(3, 2, 3)
-# plt.plot(accelerations)
-# plt.title("Acceleration (World Frame)")
-# plt.legend(["ax", "ay", "az"])
-
-# plt.subplot(3, 2, 4)
-# plt.plot(euler_angles)
-# plt.title("Euler Angles (rad)")
-# plt.legend(["roll", "pitch", "yaw"])
-
-# plt.subplot(3, 2, 5)
-# plt.plot(angular_velocities)
-# plt.title("Angular Velocity (Body Frame)")
-# plt.legend(["wx", "wy", "wz"])
-
-# plt.subplot(3, 2, 6)
-# plt.plot(angular_accelerations)
-# plt.title("Angular Acceleration (Body Frame)")
-# plt.legend(["alpha_x", "alpha_y", "alpha_z"])
-
-# plt.tight_layout()
-# plt.show()
-
-
-
-
-
 import numpy as np
+from scipy.integrate import solve_ivp
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+from matplotlib.animation import FuncAnimation
 
-class RigidBody6DOF:
-    def __init__(self, mass, inertia):
-        self.mass = mass  # 质量
-        self.inertia = np.array(inertia)  # 惯性矩阵 (3x3)
-        self.inv_inertia = np.linalg.inv(self.inertia)
+# 定义已知量
+m = 3.18  # 重量
+I = np.diag([0.029618, 0.069585, 0.042503])  # 转动惯量
+g = 9.81  # 重力加速度
 
-        # 状态变量
-        self.position = np.zeros(3)  # 在世界坐标系中的位置 (m)
-        self.velocity = np.zeros(3)  # 在世界坐标系中的速度 (m/s)
-        self.acceleration = np.zeros(3)  # 在世界坐标系中的加速度 (m/s^2)
+# 定义作用在三个坐标轴上的力和绕三个坐标轴的力矩
+def forces_and_moments(t):
+    X_Sigma, Y_Sigma, Z_Sigma = 0, 0, (9 - m)* g  # 例如，Z轴方向有重力
+    N_Sigma, K_Sigma, M_Sigma = 0.0, 0.0, 0.1  # 外力矩
+    return [X_Sigma, Y_Sigma, Z_Sigma, N_Sigma, K_Sigma, M_Sigma]
 
-        self.orientation = np.eye(3)  # 刚体坐标系相对于世界坐标系的旋转矩阵
-        self.angular_velocity = np.zeros(3)  # 在刚体坐标系的角速度 (rad/s)
-        self.angular_acceleration = np.zeros(3)  # 在刚体坐标系的角加速度 (rad/s^2)
+# 定义微分方程组
+def equations(t, y):
+    u, v, w, p, q, r, x0, y0, z0, phi, theta, psi = y
+    X_Sigma, Y_Sigma, Z_Sigma, N_Sigma, K_Sigma, M_Sigma = forces_and_moments(t)
 
-    def apply_forces_and_torques(self, forces, torques, dt):
-        # 线性动力学
-        total_force = np.array(forces)  # 总外力
-        self.acceleration = total_force / self.mass
-        self.velocity += self.acceleration * dt
-        self.position += self.velocity * dt
+    # 计算加速度
+    ax = (X_Sigma - m * (v * r - w * q + x_G * (q**2 + r**2) - y_G * (p * q - r) + z_G * (p * r + q))) / m
+    ay = (Y_Sigma - m * (w * p - u * r - y_G * (r**2 + p**2) + z_G * (q * r - p) + x_G * (q * p + r))) / m
+    az = (Z_Sigma - m * (u * q - v * p - z_G * (p**2 + q**2) + x_G * (r * p - q) + y_G * (r * q + p))) / m
 
-        # 角动力学
-        total_torque = np.array(torques)  # 总力矩
-        self.angular_acceleration = self.inv_inertia @ (
-            total_torque - np.cross(self.angular_velocity, self.inertia @ self.angular_velocity)
-        )
-        self.angular_velocity += self.angular_acceleration * dt
+    # 计算角加速度
+    ap = (N_Sigma - (I[1, 1] * p + I[2, 2] * q + I[2, 0] * r) * p + (I[0, 0] * p + I[0, 1] * q + I[0, 2] * r) * q + m * (x_G * (v + v * p - u * p) - y_G * (u + u * r - w * p))) / I[0, 0]
+    aq = (K_Sigma - (I[0, 0] * p + I[1, 1] * q + I[0, 2] * r) * q + (I[0, 0] * p + I[2, 2] * r + I[1, 2] * q) * r + m * (y_G * (w + w * p - v * p) - z_G * (v + v * r - u * p))) / I[1, 1]
+    ar = (M_Sigma - (I[0, 0] * p + I[0, 1] * q + I[1, 1] * r) * r + (I[0, 0] * p + I[1, 1] * q + I[2, 2] * r) * p + m * (z_G * (u + u * p - w * p) - x_G * (w + w * r - v * p))) / I[2, 2]
 
-        # 更新旋转矩阵
-        angular_velocity_skew = np.array([
-            [0, -self.angular_velocity[2], self.angular_velocity[1]],
-            [self.angular_velocity[2], 0, -self.angular_velocity[0]],
-            [-self.angular_velocity[1], self.angular_velocity[0], 0],
-        ])
-        self.orientation += angular_velocity_skew @ self.orientation * dt
-        self.orientation = self._orthonormalize(self.orientation)
+    # 计算位置变化
+    dx0 = u * np.cos(psi) * np.cos(theta) + v * (np.cos(psi) * np.sin(theta) * np.sin(phi) - np.sin(psi) * np.cos(phi)) + w * (np.cos(psi) * np.sin(theta) * np.cos(phi) + np.sin(psi) * np.sin(phi))
+    dy0 = u * np.sin(psi) * np.cos(theta) + v * (np.sin(psi) * np.sin(theta) * np.sin(phi) + np.cos(psi) * np.cos(phi)) + w * (np.sin(psi) * np.sin(theta) * np.cos(phi) - np.cos(psi) * np.sin(phi))
+    dz0 = -u * np.sin(theta) + v * np.cos(theta) * np.sin(phi) + w * np.cos(theta) * np.cos(phi)
 
-    def _orthonormalize(self, matrix):
-        u, _, vh = np.linalg.svd(matrix)
-        return u @ vh
+    # 计算欧拉角变化
+    dphi = p + q * np.tan(theta) * np.sin(phi) + r * np.tan(theta) * np.cos(phi)
+    dtheta = q * np.cos(phi) - r * np.sin(phi)
+    dpsi = q * np.sin(phi) / np.cos(theta) + r * np.cos(phi) / np.cos(theta)
 
-    def get_euler_angles(self):
-        # 从旋转矩阵计算欧拉角 (Z-Y-X 顺序)
-        sy = np.sqrt(self.orientation[0, 0] ** 2 + self.orientation[1, 0] ** 2)
-        singular = sy < 1e-6
+    return [ax, ay, az, ap, aq, ar, dx0, dy0, dz0, dphi, dtheta, dpsi]
 
-        if not singular:
-            x = np.arctan2(self.orientation[2, 1], self.orientation[2, 2])
-            y = np.arctan2(-self.orientation[2, 0], sy)
-            z = np.arctan2(self.orientation[1, 0], self.orientation[0, 0])
-        else:
-            x = np.arctan2(-self.orientation[1, 2], self.orientation[1, 1])
-            y = np.arctan2(-self.orientation[2, 0], sy)
-            z = 0
+# 初始条件
+x_G, y_G, z_G = 0, 0, 0  # 初始重心位置
+initial_conditions = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  # 初始速度、加速度、欧拉角均为0
 
-        return np.array([x, y, z])
+# 时间范围
+t_span = (0, 5)  # 从0到10秒
+t_eval = np.linspace(t_span[0], t_span[1], 500)  # 在这个范围内评估解
 
-# 初始化模型
-mass = 1.5  # 四旋翼的质量 (kg)
-# inertia = [[0.029618, 0.069585, 0], [0.069585, 0.029618, 0], [0, 0, 0.042503]]  # 改进的惯性矩阵 (kg*m^2)
-# inertia = [[0.03, 0.070, 0], [0.070, 0.03, 0], [0, 0, 0.04]]  # 改进的惯性矩阵 (kg*m^2)
-inertia = [[0.03, 0.005, 0], [0.005, 0.03, 0], [0, 0, 0.06]]  # 改进的惯性矩阵 (kg*m^2)
+# 求解微分方程
+solution = solve_ivp(equations, t_span, initial_conditions, t_eval=t_eval)
 
-rigid_body = RigidBody6DOF(mass, inertia)
+# 提取结果
+u, v, w, p, q, r, x0, y0, z0, phi, theta, psi = solution.y
 
-# 仿真参数
-dt = 0.01  # 时间步长 (s)
-simulation_time = 10  # 仿真总时长 (s)
-timesteps = int(simulation_time / dt)
+# 计算线速度和线加速度
+vx = u * np.cos(psi) * np.cos(theta) + v * (np.cos(psi) * np.sin(theta) * np.sin(phi) - np.sin(psi) * np.cos(phi)) + w * (np.cos(psi) * np.sin(theta) * np.cos(phi) + np.sin(psi) * np.sin(phi))
+vy = u * np.sin(psi) * np.cos(theta) + v * (np.sin(psi) * np.sin(theta) * np.sin(phi) + np.cos(psi) * np.cos(phi)) + w * (np.sin(psi) * np.sin(theta) * np.cos(phi) - np.cos(psi) * np.sin(phi))
+vz = -u * np.sin(theta) + v * np.cos(theta) * np.sin(phi) + w * np.cos(theta) * np.cos(phi)
 
-# 初始化变量
-positions, velocities, accelerations = [], [], []
-euler_angles, angular_velocities, angular_accelerations = [], [], []
-rotation_matrices = []
+ax = solution.y[0]
+ay = solution.y[1]
+az = solution.y[2]
 
-# 仿真循环
-for t in range(timesteps):
-    # 定义外力和力矩
-    base_force = np.array([0.0, 0.1, 0.0])  # 基础推力 (N)
-    base_torque = np.array([0.1, 0.0, 0.0])  # 基础力矩 (Nm)
+# 计算角速度和角加速度
+omega_x = p
+omega_y = q
+omega_z = r
 
-    # 加入空气动力学扰动
-    drag_force = -0.1 * rigid_body.velocity  # 简单线性空气阻力 (N)
-    lift_force = np.array([0.02 * rigid_body.angular_velocity[1],
-                           -0.02 * rigid_body.angular_velocity[0],
-                           0])  # 升力效应 (N)
-    
-    random_force = np.random.uniform(0.0, 0.0, 3)  # 随机扰动力 (N)
-    random_torque = np.random.uniform(0.0, 0.0, 3)  # 随机扰动力矩 (Nm)
+alpha_x = solution.y[3]
+alpha_y = solution.y[4]
+alpha_z = solution.y[5]
 
-    forces = base_force + drag_force + lift_force + random_force
-    torques = base_torque + random_torque
+# 提取欧拉角结果
+phi, theta, psi = solution.y[9], solution.y[10], solution.y[11]
 
-    # 更新刚体动力学状态
-    rigid_body.apply_forces_and_torques(forces, torques, dt)
+# 计算旋转矩阵和平移向量
+R = np.array([
+    [np.cos(psi[-1]) * np.cos(theta[-1]), np.cos(psi[-1]) * np.sin(theta[-1]) * np.sin(phi[-1]) - np.sin(psi[-1]) * np.cos(phi[-1]), np.cos(psi[-1]) * np.sin(theta[-1]) * np.cos(phi[-1]) + np.sin(psi[-1]) * np.sin(phi[-1])],
+    [np.sin(psi[-1]) * np.cos(theta[-1]), np.sin(psi[-1]) * np.sin(theta[-1]) * np.sin(phi[-1]) + np.cos(psi[-1]) * np.cos(phi[-1]), np.sin(psi[-1]) * np.sin(theta[-1]) * np.cos(phi[-1]) - np.cos(psi[-1]) * np.sin(phi[-1])],
+    [-np.sin(theta[-1]), np.cos(theta[-1]) * np.sin(phi[-1]), np.cos(theta[-1]) * np.cos(phi[-1])]
+])
 
-    # 存储输出
-    positions.append(rigid_body.position.copy())
-    velocities.append(rigid_body.velocity.copy())
-    accelerations.append(rigid_body.acceleration.copy())
-    euler_angles.append(rigid_body.get_euler_angles())
-    angular_velocities.append(rigid_body.angular_velocity.copy())
-    angular_accelerations.append(rigid_body.angular_acceleration.copy())
-    rotation_matrices.append(rigid_body.orientation.copy())
+T = np.eye(4)
+T[:3, :3] = R
+T[:3, 3] = [x0[-1], y0[-1], z0[-1]]
 
-    # 打印旋转矩阵
-    print(f"Time {t*dt:.2f}s - Rotation Matrix:\n{rigid_body.orientation}\n")
 
-# 转换为 numpy 数组
-positions = np.array(positions)
-velocities = np.array(velocities)
-accelerations = np.array(accelerations)
-euler_angles = np.array(euler_angles)
-angular_velocities = np.array(angular_velocities)
-angular_accelerations = np.array(angular_accelerations)
 
-# 绘制曲线
+# # ---------------------------------------------------------绘图和动画部分---------------------------------------------------------
+# fig = plt.figure()
+# ax = fig.add_subplot(111, projection='3d')
+
+# # 初始化绘图元素
+# trajectory_line, = ax.plot([], [], [], 'b', label="Dynamic Flight Trajectory")  # 飞行轨迹
+# airplane_axes = [ax.quiver(0, 0, 0, 0, 0, 0, color=color, label=f"drone_axis {name}") 
+#                  for color, name in zip(['r', 'g', 'b'], ['X', 'Y', 'Z'])]  # 飞机坐标轴
+# fixed_axes = [ax.quiver(0, 0, 0, 1, 0, 0, color='r', label="X0"),
+#               ax.quiver(0, 0, 0, 0, 1, 0, color='g', label="Y0"),
+#               ax.quiver(0, 0, 0, 0, 0, 1, color='b', label="Z0")]  # 原点固定坐标轴
+
+# ax.set_xlim([-10, 10])
+# ax.set_ylim([-10, 10])
+# ax.set_zlim([-10, 10])
+# ax.set_xlabel("X")
+# ax.set_ylabel("Y")
+# ax.set_zlabel("Z")
+# ax.legend()
+
+# # 更新函数
+# def update(frame):
+#     # 更新飞行轨迹
+#     trajectory_line.set_data(x0[:frame], y0[:frame])
+#     trajectory_line.set_3d_properties(z0[:frame])
+
+#     # 计算旋转矩阵
+#     phi_frame, theta_frame, psi_frame = phi[frame], theta[frame], psi[frame]
+#     R = np.array([
+#         [np.cos(psi_frame) * np.cos(theta_frame), np.cos(psi_frame) * np.sin(theta_frame) * np.sin(phi_frame) - np.sin(psi_frame) * np.cos(phi_frame), np.cos(psi_frame) * np.sin(theta_frame) * np.cos(phi_frame) + np.sin(psi_frame) * np.sin(phi_frame)],
+#         [np.sin(psi_frame) * np.cos(theta_frame), np.sin(psi_frame) * np.sin(theta_frame) * np.sin(phi_frame) + np.cos(psi_frame) * np.cos(phi_frame), np.sin(psi_frame) * np.sin(theta_frame) * np.cos(phi_frame) - np.cos(psi_frame) * np.sin(phi_frame)],
+#         [-np.sin(theta_frame), np.cos(theta_frame) * np.sin(phi_frame), np.cos(theta_frame) * np.cos(phi_frame)]
+#     ])
+
+#     # 更新机体坐标轴
+#     for i, axis in enumerate(R.T):
+#         airplane_axes[i].remove()
+#         airplane_axes[i] = ax.quiver(
+#             x0[frame], y0[frame], z0[frame],
+#             axis[0], axis[1], axis[2],
+#             color=['r', 'g', 'b'][i], length=2.0
+#         )
+
+#     return trajectory_line, *airplane_axes
+
+# # 动画
+# ani = FuncAnimation(fig, update, frames=len(t_eval), interval=10, blit=False)
+
+# plt.show()
+# # ---------------------------------------------------------绘图和动画部分---------------------------------------------------------
+
+
+# 绘制结果
 plt.figure(figsize=(12, 8))
 
-plt.subplot(3, 2, 1)
-plt.plot(positions)
-plt.title("Position (World Frame)")
-plt.legend(["x", "y", "z"])
+plt.subplot(3, 3, 1)
+plt.plot(t_eval, x0)
+plt.grid(True)
+plt.title('x0')
 
-plt.subplot(3, 2, 2)
-plt.plot(velocities)
-plt.title("Velocity (World Frame)")
-plt.legend(["vx", "vy", "vz"])
+plt.subplot(3, 3, 2)
+plt.plot(t_eval, y0)
+plt.grid(True)
+plt.title('y0')
 
-plt.subplot(3, 2, 3)
-plt.plot(accelerations)
-plt.title("Acceleration (World Frame)")
-plt.legend(["ax", "ay", "az"])
+plt.subplot(3, 3, 3)
+plt.plot(t_eval, z0)
+plt.grid(True)
+plt.title('z0')
 
-plt.subplot(3, 2, 4)
-plt.plot(euler_angles)
-plt.title("Euler Angles (rad)")
-plt.legend(["roll", "pitch", "yaw"])
+plt.subplot(3, 3, 4)
+plt.plot(t_eval, vx)
+plt.grid(True)
+plt.title('vx')
 
-plt.subplot(3, 2, 5)
-plt.plot(angular_velocities)
-plt.title("Angular Velocity (Body Frame)")
-plt.legend(["wx", "wy", "wz"])
+plt.subplot(3, 3, 5)
+plt.plot(t_eval, vy)
+plt.grid(True)
+plt.title('vy')
 
-plt.subplot(3, 2, 6)
-plt.plot(angular_accelerations)
-plt.title("Angular Acceleration (Body Frame)")
-plt.legend(["alpha_x", "alpha_y", "alpha_z"])
+plt.subplot(3, 3, 6)
+plt.plot(t_eval, vz)
+plt.grid(True)
+plt.title('vz')
+
+plt.subplot(3, 3, 7)
+plt.plot(t_eval, ax)
+plt.grid(True)
+plt.title('ax')
+
+plt.subplot(3, 3, 8)
+plt.plot(t_eval, ay)
+plt.grid(True)
+plt.title('ay')
+
+plt.subplot(3, 3, 9)
+plt.plot(t_eval, az)
+plt.grid(True)
+plt.title('az')
+
+plt.tight_layout()
+plt.show()
+
+# 绘制欧拉角变化曲线
+fig, axes = plt.subplots(3, 1, figsize=(8, 12), sharex=True)
+
+# 绘制 phi
+axes[0].plot(t_eval, phi, label="Roll (phi)", color='b')
+axes[0].set_ylabel("Roll (phi) [rad]")
+axes[0].grid(True)
+axes[0].legend()
+
+# 绘制 theta
+axes[1].plot(t_eval, theta, label="Pitch (theta)", color='g')
+axes[1].set_ylabel("Pitch (theta) [rad]")
+axes[1].grid(True)
+axes[1].legend()
+
+# 绘制 psi
+axes[2].plot(t_eval, psi, label="Yaw (psi)", color='r')
+axes[2].set_xlabel("Time [s]")
+axes[2].set_ylabel("Yaw (psi) [rad]")
+axes[2].grid(True)
+axes[2].legend()
 
 plt.tight_layout()
 plt.show()

@@ -199,7 +199,7 @@ class Vel2Force_2:
             
             w_1 = (motor_speed**2) * (self.rotor_Ct*self.rotor_radius**4 * (16 / 3600))
             w_2 = np.abs(motor_speed) * motor_speed
-            w_3 = math.sin(self.alpha) * (w_2 * -self.rotor_Ct * self.rotor_radius**4 * (16 / 3600) * self.rh0) * self.airframe_xy
+            w_3 = np.sin(self.alpha) * (w_2 * -self.rotor_Ct * self.rotor_radius**4 * (16 / 3600) * self.rh0) * self.airframe_xy
             w_4 = w_2 * (-self.rotor_Cq) * self.rotor_radius**3 * math.pi * self.rotor_radius**2 * self.rh0
             w_5 = w_1 * self.rh0
             w = np.array([0, 0, w_3+w_4])  # 1*3
