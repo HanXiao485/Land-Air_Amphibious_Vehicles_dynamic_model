@@ -2,6 +2,9 @@ import numpy as np
 from scipy.integrate import solve_ivp
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
+from matplotlib.animation import FuncAnimation
+from matplotlib.patches import FancyArrowPatch
+from mpl_toolkits.mplot3d.art3d import Line3D
 
 # Constants
 m = 3.18  # weight
@@ -34,7 +37,7 @@ def rigid_body_dynamics(t, state, forces, torques):
 
 # Initial conditions
 initial_state = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  # x, y, z, dx, dy, dz, phi, theta, psi, p, q, r
-forces = [(m+1)*g, 0, 0, 0]  # thrust, torques
+forces = [(m+0.1)*g, 0, 0.001, 0.001]  # thrust, torques
 
 time_span = (0, 10)
 time_eval = np.linspace(time_span[0], time_span[1], 100)
@@ -69,4 +72,71 @@ axs[2].set_title('Euler angles over time')
 axs[2].legend()
 
 plt.tight_layout()
+plt.show()
+
+# Animation
+fig = plt.figure(figsize=(10, 8))
+ax = fig.add_subplot(111, projection='3d')
+ax.set_xlim(-5, 5)
+ax.set_ylim(-5, 5)
+ax.set_zlim(0, 10)
+ax.set_xlabel('X')
+ax.set_ylabel('Y')
+ax.set_zlabel('Z')
+ax.set_title("Drone Trajectory Visualization")
+
+trajectory_line, = ax.plot([], [], [], 'b-', label="Trajectory")
+initial_axes = []
+real_time_axes = []
+
+# Add initial and real-time orientation axes
+def draw_axes(center, R, length=1, alpha=0.8):
+    colors = ['r', 'g', 'b']  # x, y, z
+    axes = []
+    for i in range(3):
+        start = center
+        end = center + length * R[:, i]
+        axes.append(Line3D([start[0], end[0]], [start[1], end[1]], [start[2], end[2]], color=colors[i], alpha=alpha))
+        ax.add_line(axes[-1])
+    return axes
+
+# Initialize animation
+def init():
+    trajectory_line.set_data([], [])
+    trajectory_line.set_3d_properties([])
+    R_initial = np.eye(3)  # Identity matrix for initial orientation
+    global initial_axes
+    initial_axes = draw_axes(np.array([x[0], y[0], z[0]]), R_initial)
+    return trajectory_line, *initial_axes
+
+# Update animation
+def update(frame):
+    trajectory_line.set_data(x[:frame], y[:frame])
+    trajectory_line.set_3d_properties(z[:frame])
+
+    # Remove previous real-time axes
+    global real_time_axes
+    for line in real_time_axes:
+        line.remove()
+    real_time_axes = []
+
+    # Calculate rotation matrix
+    phi_f, theta_f, psi_f = phi[frame], theta[frame], psi[frame]
+    R_x = np.array([[1, 0, 0],
+                    [0, np.cos(phi_f), -np.sin(phi_f)],
+                    [0, np.sin(phi_f), np.cos(phi_f)]])
+    R_y = np.array([[np.cos(theta_f), 0, np.sin(theta_f)],
+                    [0, 1, 0],
+                    [-np.sin(theta_f), 0, np.cos(theta_f)]])
+    R_z = np.array([[np.cos(psi_f), -np.sin(psi_f), 0],
+                    [np.sin(psi_f), np.cos(psi_f), 0],
+                    [0, 0, 1]])
+    R = R_z @ R_y @ R_x
+    center = np.array([x[frame], y[frame], z[frame]])
+    real_time_axes = draw_axes(center, R, alpha=0.9)
+    return trajectory_line, *real_time_axes
+
+ani = FuncAnimation(fig, update, frames=len(time_eval), init_func=init, blit=False, interval=50)
+
+plt.legend()
 plt.show()
