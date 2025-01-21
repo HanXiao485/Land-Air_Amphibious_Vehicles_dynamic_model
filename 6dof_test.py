@@ -37,7 +37,7 @@ def rigid_body_dynamics(t, state, forces, torques):
 
 # Initial conditions
 initial_state = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  # x, y, z, dx, dy, dz, phi, theta, psi, p, q, r
-forces = [(m+0.1)*g, 0, 0.001, 0.001]  # thrust, torques
+forces = [(m+0.1)*g, 0, 0, 0]  # thrust, torques
 
 time_span = (0, 10)
 time_eval = np.linspace(time_span[0], time_span[1], 100)
@@ -50,6 +50,11 @@ x, y, z = solution.y[0], solution.y[1], solution.y[2]
 dx, dy, dz = solution.y[3], solution.y[4], solution.y[5]
 p, q, r = solution.y[9], solution.y[10], solution.y[11]
 phi, theta, psi = solution.y[6], solution.y[7], solution.y[8]
+
+# Restrict Euler angles to 0 to 2*pi
+phi = np.mod(phi, 2 * np.pi)
+theta = np.mod(theta, 2 * np.pi)
+psi = np.mod(psi, 2 * np.pi)
 
 # Plot results
 fig1, axs = plt.subplots(3, 1, figsize=(10, 8))
