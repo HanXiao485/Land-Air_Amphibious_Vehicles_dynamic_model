@@ -42,6 +42,13 @@ class DroneSimulation:
         dpsi = (1 / np.cos(theta)) * (np.sin(phi) * q + np.cos(phi) * r)
 
         return [dx, dy, dz, ddx, ddy, ddz, dphi, dtheta, dpsi, dp, dq, dr]
+    
+    def normalize_euler_angles(self, phi, theta, psi):
+        # Normalize Euler angles to the range [-pi, pi]
+        phi = (phi + np.pi) % (2 * np.pi) - np.pi
+        theta = (theta + np.pi) % (2 * np.pi) - np.pi
+        psi = (psi + np.pi) % (2 * np.pi) - np.pi
+        return phi, theta, psi
 
     def simulate(self, initial_state, forces, time_span, time_eval):
         """
@@ -55,6 +62,9 @@ class DroneSimulation:
         """
         self.solution = solve_ivp(self.rigid_body_dynamics, time_span, initial_state, t_eval=time_eval, args=(forces,))
         self.time_eval = time_eval
+        
+        # Normalize Euler angles after simulation
+        self.solution.y[6], self.solution.y[7], self.solution.y[8] = self.normalize_euler_angles(self.solution.y[6], self.solution.y[7], self.solution.y[8])
 
     def plot_results(self):
         """Plot the simulation results."""
@@ -172,7 +182,7 @@ def main():
     initial_state = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
     # Forces and torques: [u_f, tau_phi, tau_theta, tau_psi]
-    forces = [(3.18+0.1)*9.81, 0.0, 0.001, 0.0]
+    forces = [(3.18+100)*9.81, 0.0, 0.001, 0.0]
 
     # Time span and evaluation points
     time_span = (0, 10)
