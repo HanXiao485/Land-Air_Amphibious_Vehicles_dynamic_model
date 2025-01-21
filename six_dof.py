@@ -4,9 +4,14 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.animation import FuncAnimation
 from mpl_toolkits.mplot3d.art3d import Line3D
+import configparser
+
+# 读取配置文件
+config = configparser.ConfigParser()
+config.read('config.ini')
 
 class DroneSimulation:
-    def __init__(self, mass=3.18, inertia=(0.029618, 0.069585, 0.042503), drag_coeffs=(0.0, 0.0), gravity=9.81):
+    def __init__(self, mass, inertia, drag_coeffs, gravity):
         """
         Initialize the drone simulation with given parameters.
 
@@ -175,18 +180,49 @@ class DroneSimulation:
 
 # Test the DroneSimulation class
 def main():
+    # Read parameters from config.ini
+    mass = config.getfloat('DroneSimulation', 'mass')
+    inertia = (
+        config.getfloat('DroneSimulation', 'inertia_x'),
+        config.getfloat('DroneSimulation', 'inertia_y'),
+        config.getfloat('DroneSimulation', 'inertia_z')
+    )
+    drag_coeffs = (
+        config.getfloat('DroneSimulation', 'drag_coeff_linear'),
+        config.getfloat('DroneSimulation', 'drag_coeff_angular')
+    )
+    gravity = config.getfloat('DroneSimulation', 'gravity')
+
+    initial_state = [
+        config.getfloat('Simulation', 'initial_state_x'),
+        config.getfloat('Simulation', 'initial_state_y'),
+        config.getfloat('Simulation', 'initial_state_z'),
+        config.getfloat('Simulation', 'initial_state_dx'),
+        config.getfloat('Simulation', 'initial_state_dy'),
+        config.getfloat('Simulation', 'initial_state_dz'),
+        config.getfloat('Simulation', 'initial_state_phi'),
+        config.getfloat('Simulation', 'initial_state_theta'),
+        config.getfloat('Simulation', 'initial_state_psi'),
+        config.getfloat('Simulation', 'initial_state_p'),
+        config.getfloat('Simulation', 'initial_state_q'),
+        config.getfloat('Simulation', 'initial_state_r')
+    ]
+
+    forces = [
+        config.getfloat('Simulation', 'forces_u_f'),
+        config.getfloat('Simulation', 'forces_tau_phi'),
+        config.getfloat('Simulation', 'forces_tau_theta'),
+        config.getfloat('Simulation', 'forces_tau_psi')
+    ]
+
+    time_span = (
+        config.getfloat('Simulation', 'time_span_start'),
+        config.getfloat('Simulation', 'time_span_end')
+    )
+    time_eval = np.linspace(time_span[0], time_span[1], config.getint('Simulation', 'time_eval_points'))
+
     # Initialize the simulation
-    drone = DroneSimulation()
-
-    # Initial conditions: [x, y, z, dx, dy, dz, phi, theta, psi, p, q, r]
-    initial_state = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-
-    # Forces and torques: [u_f, tau_phi, tau_theta, tau_psi]
-    forces = [(3.18+100)*9.81, 0.0, 0.001, 0.0]
-
-    # Time span and evaluation points
-    time_span = (0, 10)
-    time_eval = np.linspace(0, 10, 100)
+    drone = DroneSimulation(mass, inertia, drag_coeffs, gravity)
 
     # Simulate the dynamics
     drone.simulate(initial_state, forces, time_span, time_eval)
