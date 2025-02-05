@@ -52,4 +52,21 @@ def main():
     time_eval = np.linspace(time_span[0], time_span[1], config.getint('Simulation', 'time_eval_points'))
     
     
+    # Initialize the simulation
+    drone = DroneSimulation(mass, inertia, drag_coeffs, gravity)
     
+    # Simulate the dynamics
+    drone.simulate(initial_state, forces, time_span, time_eval)
+    
+    (x, y, z, dx, dy, dz, phi, theta, psi, p, q, r) = drone.data_results()
+
+    
+    # # Plot the results
+    # drone.plot_results()
+
+    # # Animate the trajectory
+    # drone.animate_trajectory()
+    
+
+if __name__ == "__main__":
+    main()

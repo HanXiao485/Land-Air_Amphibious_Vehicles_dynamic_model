@@ -35,6 +35,11 @@ class DroneSimulation:
         ddx = (1 / self.m) * ((np.cos(phi) * np.cos(theta) * np.sin(theta) * u_f) + np.sin(phi) * np.sin(psi) * u_f - self.k_t * dx)
         ddy = (1 / self.m) * ((np.cos(phi) * np.sin(theta) * np.sin(psi) - np.cos(psi) * np.sin(phi)) * u_f - self.k_t * dy)
         ddz = (1 / self.m) * (np.cos(phi) * np.cos(theta) * u_f - self.m * self.g - self.k_t * dz)
+        
+        if z + dz * t < 0.0:
+            z = 0.0
+            dz = 0.0
+            ddz = 0.0
 
         # Angular accelerations
         dp = (1 / self.Ix) * (-self.k_r * p - q * r * (self.Iz - self.Iy) + tau_phi)
@@ -71,14 +76,26 @@ class DroneSimulation:
         # Normalize Euler angles after simulation
         self.solution.y[6], self.solution.y[7], self.solution.y[8] = self.normalize_euler_angles(self.solution.y[6], self.solution.y[7], self.solution.y[8])
 
+    def data_results(self):
+        """Return the simulation results."""
+        solution = self.solution
+        x, y, z = solution.y[0], solution.y[1], solution.y[2]
+        dx, dy, dz = solution.y[3], solution.y[4], solution.y[5]
+        phi, theta, psi = solution.y[6], solution.y[7], solution.y[8]
+        p, q, r = solution.y[9], solution.y[10], solution.y[11]  
+        
+        return x, y, z, dx, dy, dz, phi, theta, psi, p, q, r
+
     def plot_results(self):
         """Plot the simulation results."""
         solution = self.solution
         x, y, z = solution.y[0], solution.y[1], solution.y[2]
         dx, dy, dz = solution.y[3], solution.y[4], solution.y[5]
         phi, theta, psi = solution.y[6], solution.y[7], solution.y[8]
+        p, q, r = solution.y[9], solution.y[10], solution.y[11]  # 角速度
 
-        fig, axs = plt.subplots(3, 1, figsize=(10, 8))
+        fig, axs = plt.subplots(4, 1, figsize=(10, 10))
+
         axs[0].plot(self.time_eval, x, label='x')
         axs[0].plot(self.time_eval, y, label='y')
         axs[0].plot(self.time_eval, z, label='z')
@@ -96,6 +113,13 @@ class DroneSimulation:
         axs[2].plot(self.time_eval, psi, label='psi')
         axs[2].set_title('Euler angles over time')
         axs[2].legend()
+        
+        # **新增: 角速度绘图**
+        axs[3].plot(self.time_eval, p, label='p (Roll rate)')
+        axs[3].plot(self.time_eval, q, label='q (Pitch rate)')
+        axs[3].plot(self.time_eval, r, label='r (Yaw rate)')
+        axs[3].set_title('Euler angles velocity over time')
+        axs[3].legend()
 
         plt.tight_layout()
         plt.show()

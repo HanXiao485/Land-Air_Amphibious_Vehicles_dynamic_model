@@ -3,6 +3,11 @@ import matplotlib.pyplot as plt
 
 # PID控制器类
 class PIDController:
+    """
+    PID控制器类
+    目标：末状态
+    输入：升力、三轴力矩
+    """
     def __init__(self, kp, ki, kd, dt):
         self.kp = kp  # 比例增益
         self.ki = ki  # 积分增益
@@ -31,7 +36,7 @@ class MultirotorDynamics:
         self.z = 0      # 高度
         self.vz = 0     # 垂直速度
 
-    def update(self, thrust, moments, dt):
+    def update(self, thrust, moments, dt):  # 升力、三轴力矩、时间步长
         # 更新飞行器姿态和高度
         pitch_moment, roll_moment, yaw_moment = moments
         self.pitch += pitch_moment * dt
