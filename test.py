@@ -466,7 +466,8 @@ class DroneSimulation:
         headers = ['time', 'x', 'y', 'z', 'dx', 'dy', 'dz', 
                   'phi', 'theta', 'psi', 'p', 'q', 'r']
         csv_data.append([time_eval[0]] + current_state.tolist())
-
+    
+        self.lift_forces = [0]  # 用于存储升力数据
         # 主循环进行迭代计算
         for i in range(1, num_steps):
             # 使用PID控制器调整升力（u_f）
@@ -486,9 +487,7 @@ class DroneSimulation:
             
             states[i] = current_state
             csv_data.append([time_eval[i]] + current_state.tolist())
-
-            # 记录加速度和升力数据
-            # self.accelerations.append(np.sqrt(current_state[3]**2 + current_state[4]**2 + current_state[5]**2))
+            
             self.lift_forces.append(u_f_pid)
 
         # 保存结果到对象属性
@@ -537,15 +536,23 @@ class DroneSimulation:
         axs[3].set_title('Euler angles velocity over time')
         axs[3].legend()
 
-        # # 绘制加速度曲线
-        # axs[4].plot(self.time_eval, self.accelerations, label='Acceleration')
-        # axs[4].set_title('Acceleration over time')
-        # axs[4].legend()
+        # 绘制加速度曲线
+        axs[4].plot(self.time_eval, dx, label='dx ')
+        axs[4].plot(self.time_eval, dy, label='dy ')
+        axs[4].plot(self.time_eval, dz, label='dz ')
+        axs[4].set_title('Acceleration over time')
+        axs[4].legend()
 
         # 绘制升力曲线
         axs[5].plot(self.time_eval, self.lift_forces, label='Lift Force')
         axs[5].set_title('Lift Force over time')
         axs[5].legend()
+        
+        # 绘制目标高度基准线
+        axs[0].axhline(y=10, color='r', linestyle='--', label='Target Height (10m)')
+        axs[0].set_xlabel('Time')
+        axs[0].set_ylabel('Height (m)')
+        axs[0].legend()
 
         plt.tight_layout()
         plt.show()
@@ -640,7 +647,7 @@ class DroneSimulation:
 # Test the DroneSimulation class with PID controller
 def main():
     # 配置PID控制器
-    pid = PIDController(kp=15.0, ki=13, kd=10, set_point=10, u_f_min=0.0, u_f_max=2000)  # 推力范围[0, 20]
+    pid = PIDController(kp=15.0, ki=13, kd=10, set_point=10, u_f_min=0.0, u_f_max=200)  # 推力范围[0, 20]
     
     # Read parameters from config.ini
     mass = config.getfloat('DroneSimulation', 'mass')
