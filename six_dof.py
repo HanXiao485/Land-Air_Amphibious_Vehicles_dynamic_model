@@ -149,7 +149,10 @@ class DroneSimulation:
             for i in range(3):
                 start = center
                 end = center + length * R[:, i]
-                axes.append(Line3D([start[0], end[0]], [start[1], end[1]], [start[2], end[2]], color=colors[i], alpha=alpha))
+                axes.append(Line3D([start[0], end[0]], 
+                                   [start[1], end[1]], 
+                                   [start[2], end[2]], 
+                                   color=colors[i], alpha=alpha))
                 ax.add_line(axes[-1])
             return axes
         
