@@ -36,10 +36,10 @@ class DroneSimulation:
         ddy = (1 / self.m) * ((np.cos(phi) * np.sin(theta) * np.sin(psi) - np.cos(psi) * np.sin(phi)) * u_f - self.k_t * dy)
         ddz = (1 / self.m) * (np.cos(phi) * np.cos(theta) * u_f - self.m * self.g - self.k_t * dz)
         
-        if z + dz * t < 0.0:
-            z = 0.0
-            dz = 0.0
-            ddz = 0.0
+        # 如果无人机已经在地面（z<=0）且正下落，则修正为不再下落
+        if z <= 0 and dz < 0:
+            dz = 0       # 将垂直速度置零
+            ddz = 0      # 将垂直加速度置零
 
         # Angular accelerations
         dp = (1 / self.Ix) * (-self.k_r * p - q * r * (self.Iz - self.Iy) + tau_phi)
