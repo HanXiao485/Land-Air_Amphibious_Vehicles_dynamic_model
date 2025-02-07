@@ -8,7 +8,7 @@ from mpl_toolkits.mplot3d.art3d import Line3D
 import configparser
 
 """
-轨迹跟踪
+一维轨迹跟踪
 """
 
 # 读取配置文件
@@ -531,7 +531,7 @@ def main():
 
     # 定义目标曲线，此处目标高度函数为 10*sin(0.5*t)+10
     target_curve = TargetCurve(curve_func=lambda t: 10 * np.sin(0.5*t) + 15,
-                               label='Target Sine Curve')
+                               label='Target Curve')
 
     # 初始化仿真对象，传入 PID 控制器和目标曲线
     drone = DroneSimulation(mass, inertia, drag_coeffs, gravity, pid, target_curve=target_curve)
