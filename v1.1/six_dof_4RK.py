@@ -155,24 +155,24 @@ def pid_callback(current_time, current_state, current_forces):
     
     # 在每一次迭代中重新赋值 PID 参数（示例：随迭代次数微调某些参数）
     # 例如，每次迭代使位置环的 Kp_x 略微增大，用户可以根据实际需要修改
-    pid_controller.Kp_x = 1.0 + 0.00001 * iteration_count
-    pid_controller.Ki_x = 1.0 + 0.00001 * iteration_count
-    pid_controller.Kd_x = 1.0 + 0.00001 * iteration_count
-    pid_controller.Kp_y = 1.0 + 0.00001 * iteration_count
-    pid_controller.Ki_y = 1.0 + 0.00001 * iteration_count
-    pid_controller.Kd_y = 1.0 + 0.00001 * iteration_count
-    pid_controller.Kp_z = 1.0 + 0.00001 * iteration_count
-    pid_controller.Ki_z = 1.0 + 0.00001 * iteration_count
-    pid_controller.Kd_z = 1.0 + 0.00001 * iteration_count
-    pid_controller.Kp_phi = 1.0 + 0.00001 * iteration_count
-    pid_controller.Ki_phi = 1.0 + 0.00001 * iteration_count
-    pid_controller.Kd_phi = 1.0 + 0.00001 * iteration_count
-    pid_controller.Kp_theta = 1.0 + 0.00001 * iteration_count
-    pid_controller.Ki_theta = 1.0 + 0.00001 * iteration_count
-    pid_controller.Kd_theta = 1.0 + 0.00001 * iteration_count
-    pid_controller.Kp_psi = 1.0 + 0.00001 * iteration_count
-    pid_controller.Ki_psi = 1.0 + 0.00001 * iteration_count
-    pid_controller.Kd_psi = 1.0 + 0.00001 * iteration_count
+    # pid_controller.Kp_x = 1.0 + 0.00001 * iteration_count
+    # pid_controller.Ki_x = 1.0 + 0.00001 * iteration_count
+    # pid_controller.Kd_x = 1.0 + 0.00001 * iteration_count
+    # pid_controller.Kp_y = 1.0 + 0.00001 * iteration_count
+    # pid_controller.Ki_y = 1.0 + 0.00001 * iteration_count
+    # pid_controller.Kd_y = 1.0 + 0.00001 * iteration_count
+    # pid_controller.Kp_z = 1.0 + 0.00001 * iteration_count
+    # pid_controller.Ki_z = 1.0 + 0.00001 * iteration_count
+    # pid_controller.Kd_z = 1.0 + 0.00001 * iteration_count
+    # pid_controller.Kp_phi = 1.0 + 0.00001 * iteration_count
+    # pid_controller.Ki_phi = 1.0 + 0.00001 * iteration_count
+    # pid_controller.Kd_phi = 1.0 + 0.00001 * iteration_count
+    # pid_controller.Kp_theta = 1.0 + 0.00001 * iteration_count
+    # pid_controller.Ki_theta = 1.0 + 0.00001 * iteration_count
+    # pid_controller.Kd_theta = 1.0 + 0.00001 * iteration_count
+    # pid_controller.Kp_psi = 1.0 + 0.00001 * iteration_count
+    # pid_controller.Ki_psi = 1.0 + 0.00001 * iteration_count
+    # pid_controller.Kd_psi = 1.0 + 0.00001 * iteration_count
     # 这里可以根据需要对其他参数也进行更新
 
     new_forces = pid_controller.update(current_time, current_state)
@@ -305,8 +305,7 @@ class DroneSimulation:
         self.solution = type('Solution', (), {})()
         self.solution.y = states.T  # 转置后，每行代表一个状态变量
         self.time_eval = times
-        self.solution.y[6], self.solution.y[7], self.solution.y[8] = \
-            self.normalize_euler_angles(self.solution.y[6], self.solution.y[7], self.solution.y[8])
+        self.solution.y[6], self.solution.y[7], self.solution.y[8] = self.normalize_euler_angles(self.solution.y[6], self.solution.y[7], self.solution.y[8])
 
     def data_results(self):
         solution = self.solution
