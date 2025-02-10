@@ -4,13 +4,16 @@ from matplotlib.animation import FuncAnimation
 from mpl_toolkits.mplot3d.art3d import Line3D
 import configparser
 import csv
+import os
 import tkinter as tk
 from tkinter import ttk
 from tkinter import messagebox
 
 # Read configuration file
+script_dir = os.path.dirname(os.path.abspath(__file__))
+file_path = os.path.join(script_dir, 'config.ini')
 config = configparser.ConfigParser()
-config.read('E:\\Land-Air_Amphibious_Vehicles_dynamic_model\\v1.2_gui\\config.ini')
+config.read(file_path)
 
 ########################################################################
 # PID Controller Class with Three Loops (Position, Attitude, Rate)
@@ -116,10 +119,10 @@ class DualLoopPIDController:
         az_des = self.Kp_z * error_z + self.Ki_z * self.int_z + self.Kd_z * d_error_z
 
         # Compute desired attitude from position control using small-angle approximation.
-        # For x-axis acceleration: x acceleration ~ (u_f/m)*theta,
-        # so to get positive acceleration in x, desired theta should be positive.
+        # For x-axis acceleration: x acceleration ~ (u_f/m)*theta.
+        # To get positive acceleration in x, desired theta should be positive.
         phi_des_pos = (1.0 / self.g) * ay_des
-        theta_des_pos = (1.0 / self.g) * ax_des  # Removed negative sign
+        theta_des_pos = (1.0 / self.g) * ax_des  # Removed negative sign to correct x-axis motion
 
         # Use computed values if target roll/pitch are set to 0.
         if self.desired_attitude[0] == 0:
@@ -179,27 +182,26 @@ class DualLoopPIDController:
         return [u_f, tau_phi, tau_theta, tau_psi]
 
 ########################################################################
-# Global PID Controller Instance (to be initialized in main)
+# PID Callback Handler Class
 ########################################################################
-pid_controller = None
-iteration_count = 0
+class PIDCallbackHandler:
+    """
+    Encapsulates the callback function for the simulation.
+    This class handles the operations to be performed at the end of each integration step,
+    including printing the current time and UAV state, updating PID controller parameters,
+    and returning the updated control inputs.
+    """
+    def __init__(self, pid_controller):
+        self.pid_controller = pid_controller
+        self.iteration_count = 0
 
-def pid_callback(current_time, current_state, current_forces):
-    """
-    Callback function called after each integration step:
-      1. Print current time and UAV state.
-      2. Optionally update PID parameters.
-      3. Return updated control input.
-    """
-    global pid_controller, iteration_count
-    iteration_count += 1
-    print("Iteration: {}, Time: {:.3f}, State: {}".format(iteration_count, current_time, current_state))
-    
-    # Example: update PID parameters if needed (e.g., adjust outer loop Kp_x)
-    pid_controller.Kp_x = 1.0 + 0.0001 * iteration_count
-    
-    new_forces = pid_controller.update(current_time, current_state)
-    return new_forces
+    def callback(self, current_time, current_state, current_forces):
+        self.iteration_count += 1
+        print("Iteration: {}, Time: {:.3f}, State: {}".format(self.iteration_count, current_time, current_state))
+        # Example: update PID parameters if needed (adjust outer loop Kp_x)
+        self.pid_controller.Kp_x = 1.0 + 0.0001 * self.iteration_count
+        new_forces = self.pid_controller.update(current_time, current_state)
+        return new_forces
 
 ########################################################################
 # Fourth-order Runge-Kutta Integrator Class (with callback)
@@ -207,7 +209,7 @@ def pid_callback(current_time, current_state, current_forces):
 class RK4Integrator:
     """
     Fourth-order Runge-Kutta integrator.
-    After each integration step, a callback function is called to update the control input.
+    After each integration step, calls a callback function to update the control input.
     """
     def __init__(self, func, forces):
         self.func = func
@@ -245,6 +247,10 @@ class CSVExporter:
     Exports the UAV state and control inputs at each time step to a CSV file.
     """
     def __init__(self, filename, headers=None):
+        """
+        Initializes the CSVExporter object with a filename and optional headers.
+        If no headers are provided, default headers are used.
+        """
         if headers is None:
             self.headers = ['time', 'x', 'y', 'z', 'dx', 'dy', 'dz',
                             'phi', 'theta', 'psi', 'p', 'q', 'r',
@@ -254,6 +260,9 @@ class CSVExporter:
         self.filename = filename
 
     def export(self, time_eval, state_matrix, forces):
+        """
+        Exports the UAV state and control inputs at each time step to a CSV file.
+        """
         n_steps = len(time_eval)
         with open(self.filename, 'w', newline='') as f:
             writer = csv.writer(f)
@@ -450,6 +459,8 @@ class DroneSimulation:
         plt.legend()
         plt.show()
 
+# ----------------- End Simulation Classes -----------------
+
 # ----------------- GUI Code -----------------
 class App:
     def __init__(self, root):
@@ -555,14 +566,10 @@ class App:
         self.quit_button.pack(pady=5)
 
     def create_entries(self, parent, param_dict, row=0):
-        """
-        Create a label and a Spinbox (with up/down arrows) for each parameter.
-        The Spinbox uses an increment of 0.1.
-        """
+        """Create a label and a Spinbox (with arrow buttons) for each parameter with increment 0.1."""
         for key, val in param_dict.items():
             lbl = ttk.Label(parent, text=key)
             lbl.grid(row=row, column=0, sticky="W", padx=5, pady=2)
-            # Use tk.Spinbox with a wide range and an increment of 0.1
             spin = tk.Spinbox(parent, from_=-10000, to=10000, increment=0.1, width=10)
             spin.delete(0, "end")
             spin.insert(0, str(val))
@@ -687,14 +694,18 @@ class App:
                 rate_kp_psi=pid_params["rate_kp_psi"], rate_ki_psi=pid_params["rate_ki_psi"], rate_kd_psi=pid_params["rate_kd_psi"]
             )
             
+            # Instantiate a PID callback handler object
+            callback_handler = PIDCallbackHandler(pid_controller)
+            
             drone = DroneSimulation(
                 mass=drone_params["mass"],
                 inertia=(drone_params["inertia_x"], drone_params["inertia_y"], drone_params["inertia_z"]),
                 drag_coeffs=(drone_params["drag_coeff_linear"], drone_params["drag_coeff_angular"]),
                 gravity=drone_params["gravity"]
             )
-            drone.simulate(initial_state, forces, (sim_params["time_span_start"], sim_params["time_span_end"]),
-                           time_eval, callback=pid_callback)
+            drone.simulate(initial_state, forces,
+                           (sim_params["time_span_start"], sim_params["time_span_end"]),
+                           time_eval, callback=callback_handler.callback)
             
             csv_exporter = CSVExporter("simulation_results.csv")
             csv_exporter.export(time_eval, drone.solution.y, forces)
@@ -703,6 +714,23 @@ class App:
             drone.animate_trajectory()
         except Exception as e:
             messagebox.showerror("Error", str(e))
+
+class PIDCallbackHandler:
+    """
+    Encapsulates the callback function for the simulation.
+    All callback operations are implemented in this class.
+    """
+    def __init__(self, pid_controller):
+        self.pid_controller = pid_controller
+        self.iteration_count = 0
+
+    def callback(self, current_time, current_state, current_forces):
+        self.iteration_count += 1
+        print("Iteration: {}, Time: {:.3f}, State: {}".format(self.iteration_count, current_time, current_state))
+        # Example: update PID parameter Kp_x dynamically
+        self.pid_controller.Kp_x = 1.0 + 0.0001 * self.iteration_count
+        new_forces = self.pid_controller.update(current_time, current_state)
+        return new_forces
 
 def main():
     root = tk.Tk()
