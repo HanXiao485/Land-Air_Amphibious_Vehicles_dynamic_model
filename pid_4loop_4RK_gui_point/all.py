@@ -265,18 +265,19 @@ class DroneSimulation:
 
     def rigid_body_dynamics(self, t, state, forces):
         """
-        UAV rigid-body dynamics.
+        UAV rigid-body dynamics with external forces.
         State: [x, y, z, dx, dy, dz, phi, theta, psi, p, q, r]
         Control input: [lift_force, tau_phi, tau_theta, tau_psi]
         """
         x, y, z, dx, dy, dz, phi, theta, psi, p, q, r = state
-        u_f, tau_phi, tau_theta, tau_psi = forces
+        u_f, tau_phi, tau_theta, tau_psi = forces[:4]  # Control inputs
+        external_force = forces[4:]  # External forces (step, linear, or noise)
 
         ddx = (1 / self.m) * ((np.cos(phi) * np.cos(theta) * np.sin(theta) * u_f) +
-                              np.sin(phi) * np.sin(psi) * u_f - self.k_t * dx)
+                              np.sin(phi) * np.sin(psi) * u_f - self.k_t * dx) + external_force[0] / self.m
         ddy = (1 / self.m) * ((np.cos(phi) * np.sin(theta) * np.sin(psi) -
-                              np.cos(psi) * np.sin(phi)) * u_f - self.k_t * dy)
-        ddz = (1 / self.m) * (np.cos(phi) * np.cos(theta) * u_f - self.m * self.g - self.k_t * dz)
+                              np.cos(psi) * np.sin(phi)) * u_f - self.k_t * dy) + external_force[1] / self.m
+        ddz = (1 / self.m) * (np.cos(phi) * np.cos(theta) * u_f - self.m * self.g - self.k_t * dz) + external_force[2] / self.m
         if z <= 0 and u_f < self.m * self.g:
             dz = 0
             ddz = 0
@@ -294,7 +295,11 @@ class DroneSimulation:
         psi = (psi + np.pi) % (2 * np.pi) - np.pi
         return phi, theta, psi
 
-    def simulate(self, initial_state, forces, time_span, time_eval, callback=None):
+    def simulate(self, initial_state, forces, time_span, time_eval, external_forces, callback=None):
+        """
+        Simulate the drone dynamics with external forces.
+        Forces include both control inputs and external disturbances.
+        """
         integrator = RK4Integrator(self.rigid_body_dynamics, forces)
         times, states = integrator.integrate(time_eval, initial_state, callback)
         self.solution = type('Solution', (), {})()
@@ -378,23 +383,23 @@ class DroneSimulation:
             for i in range(3):
                 start = center
                 end = center + length * R[:, i]
-                axes.append(Line3D([start[0], end[0]],
-                                   [start[1], end[1]],
-                                   [start[2], end[2]],
+                axes.append(Line3D([start[0], end[0]], 
+                                   [start[1], end[1]], 
+                                   [start[2], end[2]], 
                                    color=colors[i], alpha=alpha))
                 ax.add_line(axes[-1])
             return axes
 
         initial_position = np.array([x[0], y[0], z[0]])
         initial_phi, initial_theta, initial_psi = phi[0], theta[0], psi[0]
-        R_x = np.array([[1, 0, 0],
-                        [0, np.cos(initial_phi), -np.sin(initial_phi)],
+        R_x = np.array([[1, 0, 0], 
+                        [0, np.cos(initial_phi), -np.sin(initial_phi)], 
                         [0, np.sin(initial_phi), np.cos(initial_phi)]])
-        R_y = np.array([[np.cos(initial_theta), 0, np.sin(initial_theta)],
-                        [0, 1, 0],
+        R_y = np.array([[np.cos(initial_theta), 0, np.sin(initial_theta)], 
+                        [0, 1, 0], 
                         [-np.sin(initial_theta), 0, np.cos(initial_theta)]])
-        R_z = np.array([[np.cos(initial_psi), -np.sin(initial_psi), 0],
-                        [np.sin(initial_psi), np.cos(initial_psi), 0],
+        R_z = np.array([[np.cos(initial_psi), -np.sin(initial_psi), 0], 
+                        [np.sin(initial_psi), np.cos(initial_psi), 0], 
                         [0, 0, 1]])
         R_initial = R_z @ R_y @ R_x
         draw_axes(initial_position, R_initial, alpha=1.0)
@@ -429,6 +434,29 @@ class DroneSimulation:
         ani = FuncAnimation(fig, update, frames=len(self.time_eval), init_func=init, blit=False, interval=interval)
         plt.legend()
         plt.show()
+
+    def apply_external_force(self, force_type="step", direction=None, magnitude=None, noise_level=0.0):
+        """
+        Apply external forces to the UAV.
+        
+        :param force_type: Type of external force ('step', 'linear', 'noise')
+        :param direction: Direction of the force (for 'step' or 'linear' forces, should be a 3D vector)
+        :param magnitude: Magnitude of the force (for 'step' or 'linear' forces, a scalar)
+        :param noise_level: Amplitude of noise (for 'noise' force type)
+        """
+        if force_type == "step":
+            if direction is None or magnitude is None:
+                raise ValueError("Direction and magnitude must be specified for 'step' force.")
+            return direction * magnitude
+        elif force_type == "linear":
+            if direction is None or magnitude is None:
+                raise ValueError("Direction and magnitude must be specified for 'linear' force.")
+            return direction * magnitude * np.linspace(0, 1, len(self.time_eval))
+        elif force_type == "noise":
+            noise = np.random.normal(0, noise_level, size=(3,))
+            return noise
+        else:
+            raise ValueError("Invalid force type. Must be 'step', 'linear', or 'noise'.")
         
         
 ########################################################################
@@ -789,8 +817,12 @@ class App:
                 drag_coeffs=(drone_params["drag_coeff_linear"], drone_params["drag_coeff_angular"]),
                 gravity=drone_params["gravity"]
             )
-            drone.simulate(initial_state, forces, (sim_params["time_span_start"], sim_params["time_span_end"]),
-                           time_eval, callback=callback_handler.callback)
+            drone.simulate(initial_state, 
+                           forces, 
+                           (sim_params["time_span_start"], sim_params["time_span_end"]),
+                           time_eval, 
+                           external_forces=drone.apply_external_force(force_type='noise', direction=1 ,magnitude=1, noise_level=0), 
+                           callback=callback_handler.callback)
             
             csv_exporter = CSVExporter("simulation_results.csv")
             csv_exporter.export(time_eval, drone.solution.y, forces)

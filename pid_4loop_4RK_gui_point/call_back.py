@@ -30,6 +30,8 @@ class PIDCallbackHandler:
         # Example: update PID parameter Kp_x dynamically if needed
         # self.pid_controller.Kp_x = 1.0 + 0.0001 * self.iteration_count
         
+        print("pid_kp_z: {}, pid_ki_z: {}, pid_kd_z: {}".format(self.pid_controller.Kp_z, self.pid_controller.Ki_z, self.pid_controller.Kd_z))
+        
         # If in Curve Tracking mode, update desired position based on trajectory
         if self.flight_mode == "Curve Tracking" and self.trajectory_planner is not None:
             new_target = self.trajectory_planner.get_target_position(current_time)
