@@ -1,6 +1,5 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.animation import FuncAnimation
 from mpl_toolkits.mplot3d.art3d import Line3D
 import configparser
@@ -19,14 +18,14 @@ config.read('E:\\Land-Air_Amphibious_Vehicles_dynamic_model\\v1.2_gui\\config.in
 class DualLoopPIDController:
     """
     Three-loop PID controller:
-    - Outer loop (Position control): calculates desired acceleration based on position error,
-      and then computes the desired roll and pitch angles using small-angle approximation.
-    - Middle loop (Attitude control): calculates desired angular rates based on attitude error
-      using full PID control (with proportional, integral and derivative terms).
-    - Inner loop (Rate control): calculates control moments using PID control on angular rate error.
-    
-    The total lift force is computed from the vertical acceleration:
-         u_f = mass * (g + a_z_des)
+      - Outer loop (Position control): calculates desired acceleration based on position error,
+        then computes the desired roll and pitch angles using small-angle approximation.
+      - Middle loop (Attitude control): calculates desired angular rates from the attitude error
+        using full PID control (proportional, integral, derivative).
+      - Inner loop (Rate control): calculates control moments from angular rate errors via PID control.
+      
+      The total lift force is computed as:
+          u_f = mass * (g + a_z_des)
     """
     def __init__(self, mass, gravity, desired_position, desired_attitude, dt,
                  # Outer loop PID parameters (Position control)
@@ -57,7 +56,7 @@ class DualLoopPIDController:
         self.att_kp_theta = att_kp_theta; self.att_ki_theta = att_ki_theta; self.att_kd_theta = att_kd_theta
         self.att_kp_psi = att_kp_psi; self.att_ki_psi = att_ki_psi; self.att_kd_psi = att_kd_psi
 
-        # Initialize middle loop integration and last error (Attitude control)
+        # Initialize middle loop integration and previous error (Attitude control)
         self.int_phi_att = 0.0; self.last_error_phi_att = 0.0
         self.int_theta_att = 0.0; self.last_error_theta_att = 0.0
         self.int_psi_att = 0.0; self.last_error_psi_att = 0.0
@@ -67,12 +66,12 @@ class DualLoopPIDController:
         self.rate_kp_theta = rate_kp_theta; self.rate_ki_theta = rate_ki_theta; self.rate_kd_theta = rate_kd_theta
         self.rate_kp_psi = rate_kp_psi; self.rate_ki_psi = rate_ki_psi; self.rate_kd_psi = rate_kd_psi
 
-        # Initialize outer loop integration and last error (Position control)
+        # Initialize outer loop integration and previous error (Position control)
         self.int_x = 0.0; self.last_error_x = 0.0
         self.int_y = 0.0; self.last_error_y = 0.0
         self.int_z = 0.0; self.last_error_z = 0.0
 
-        # Initialize inner loop integration and last error (Angular rate control)
+        # Initialize inner loop integration and previous error (Angular rate control)
         self.int_p = 0.0; self.last_error_p = 0.0
         self.int_q = 0.0; self.last_error_q = 0.0
         self.int_r = 0.0; self.last_error_r = 0.0
@@ -83,7 +82,7 @@ class DualLoopPIDController:
         """
         Compute new control input based on current time and state.
         State: [x, y, z, dx, dy, dz, phi, theta, psi, p, q, r]
-        Output: Control inputs: [lift_force, tau_phi, tau_theta, tau_psi]
+        Output: [lift_force, tau_phi, tau_theta, tau_psi]
         """
         if self.last_time is None:
             dt = self.dt
@@ -99,8 +98,6 @@ class DualLoopPIDController:
         error_x = x_des - x
         error_y = y_des - y
         error_z = z_des - z
-        print("error_x: ", error_x)
-    
 
         self.int_x += error_x * dt
         self.int_y += error_y * dt
@@ -114,17 +111,17 @@ class DualLoopPIDController:
         self.last_error_y = error_y
         self.last_error_z = error_z
 
-        # Compute desired acceleration
         ax_des = self.Kp_x * error_x + self.Ki_x * self.int_x + self.Kd_x * d_error_x
         ay_des = self.Kp_y * error_y + self.Ki_y * self.int_y + self.Kd_y * d_error_y
         az_des = self.Kp_z * error_z + self.Ki_z * self.int_z + self.Kd_z * d_error_z
 
-        # Compute computed desired attitude from position control using small-angle approximation
+        # Compute desired attitude from position control using small-angle approximation.
+        # For x-axis acceleration: x acceleration ~ (u_f/m)*theta,
+        # so to get positive acceleration in x, desired theta should be positive.
         phi_des_pos = (1.0 / self.g) * ay_des
-        theta_des_pos = (1.0 / self.g) * ax_des
+        theta_des_pos = (1.0 / self.g) * ax_des  # Removed negative sign
 
-        # If desired attitude for roll and pitch is set to 0, use computed values for horizontal motion.
-        # Otherwise, use the provided desired attitude.
+        # Use computed values if target roll/pitch are set to 0.
         if self.desired_attitude[0] == 0:
             phi_des = phi_des_pos
         else:
@@ -133,15 +130,12 @@ class DualLoopPIDController:
             theta_des = theta_des_pos
         else:
             theta_des = self.desired_attitude[1]
-        # Yaw is always taken from desired attitude.
         psi_des = self.desired_attitude[2]
 
-        # Middle loop: Attitude control (calculate desired angular rates with full PID)
+        # Middle loop: Attitude control with full PID
         error_phi = phi_des - phi
         error_theta = theta_des - theta
         error_psi = psi_des - psi
-        
-        print("Error theta: ", error_theta)
 
         self.int_phi_att += error_phi * dt
         self.int_theta_att += error_theta * dt
@@ -159,7 +153,7 @@ class DualLoopPIDController:
         q_des = self.att_kp_theta * error_theta + self.att_ki_theta * self.int_theta_att + self.att_kd_theta * d_error_theta_att
         r_des = self.att_kp_psi * error_psi + self.att_ki_psi * self.int_psi_att + self.att_kd_psi * d_error_psi_att
 
-        # Inner loop: Rate control
+        # Inner loop: Angular rate control
         error_p = p_des - p
         error_q = q_des - q
         error_r = r_des - r
@@ -180,13 +174,12 @@ class DualLoopPIDController:
         tau_theta = self.rate_kp_theta * error_q + self.rate_ki_theta * self.int_q + self.rate_kd_theta * d_error_q
         tau_psi = self.rate_kp_psi * error_r + self.rate_ki_psi * self.int_r + self.rate_kd_psi * d_error_r
 
-        # Compute total lift force
         u_f = self.mass * (self.g + az_des)
 
         return [u_f, tau_phi, tau_theta, tau_psi]
 
 ########################################################################
-# Global PID Controller instance (to be initialized in main)
+# Global PID Controller Instance (to be initialized in main)
 ########################################################################
 pid_controller = None
 iteration_count = 0
@@ -195,26 +188,26 @@ def pid_callback(current_time, current_state, current_forces):
     """
     Callback function called after each integration step:
       1. Print current time and UAV state.
-      2. Update PID parameters if needed.
+      2. Optionally update PID parameters.
       3. Return updated control input.
     """
     global pid_controller, iteration_count
     iteration_count += 1
-    # print("Iteration: {}, Time: {:.3f}, State: {}".format(iteration_count, current_time, current_state))
+    print("Iteration: {}, Time: {:.3f}, State: {}".format(iteration_count, current_time, current_state))
     
-    # Example: update PID parameters if needed (e.g., adjust position control Kp_x)
+    # Example: update PID parameters if needed (e.g., adjust outer loop Kp_x)
     pid_controller.Kp_x = 1.0 + 0.0001 * iteration_count
     
     new_forces = pid_controller.update(current_time, current_state)
     return new_forces
 
 ########################################################################
-# RK4 Integrator Class (with callback)
+# Fourth-order Runge-Kutta Integrator Class (with callback)
 ########################################################################
 class RK4Integrator:
     """
     Fourth-order Runge-Kutta integrator.
-    After each integration step, calls a callback function to update the control input.
+    After each integration step, a callback function is called to update the control input.
     """
     def __init__(self, func, forces):
         self.func = func
@@ -233,7 +226,6 @@ class RK4Integrator:
             k3 = np.array(self.func(t_current + dt/2, state + dt/2 * k2, self.forces))
             k4 = np.array(self.func(t_current + dt, state + dt * k3, self.forces))
             new_state = state + (dt/6) * (k1 + 2*k2 + 2*k3 + k4)
-            # Prevent UAV from penetrating the ground: if z < 0, set z and dz to 0
             if new_state[2] < 0:
                 new_state[2] = 0
                 new_state[5] = 0
@@ -458,132 +450,12 @@ class DroneSimulation:
         plt.legend()
         plt.show()
 
-# ########################################################################
-# # Main Function
-# ########################################################################
-# def main():
-#     # Read UAV and simulation parameters from config file
-#     mass = config.getfloat('DroneSimulation', 'mass')
-#     inertia = (
-#         config.getfloat('DroneSimulation', 'inertia_x'),
-#         config.getfloat('DroneSimulation', 'inertia_y'),
-#         config.getfloat('DroneSimulation', 'inertia_z')
-#     )
-#     drag_coeffs = (
-#         config.getfloat('DroneSimulation', 'drag_coeff_linear'),
-#         config.getfloat('DroneSimulation', 'drag_coeff_angular')
-#     )
-#     gravity = config.getfloat('DroneSimulation', 'gravity')
-
-#     # Read initial state from [Simulation]
-#     initial_state = [
-#         config.getfloat('Simulation', 'initial_state_x'),
-#         config.getfloat('Simulation', 'initial_state_y'),
-#         config.getfloat('Simulation', 'initial_state_z'),
-#         config.getfloat('Simulation', 'initial_state_dx'),
-#         config.getfloat('Simulation', 'initial_state_dy'),
-#         config.getfloat('Simulation', 'initial_state_dz'),
-#         config.getfloat('Simulation', 'initial_state_phi'),
-#         config.getfloat('Simulation', 'initial_state_theta'),
-#         config.getfloat('Simulation', 'initial_state_psi'),
-#         config.getfloat('Simulation', 'initial_state_p'),
-#         config.getfloat('Simulation', 'initial_state_q'),
-#         config.getfloat('Simulation', 'initial_state_r')
-#     ]
-
-#     # Read target position from [Simulation]
-#     target_position = (
-#         config.getfloat('Simulation', 'target_position_x'),
-#         config.getfloat('Simulation', 'target_position_y'),
-#         config.getfloat('Simulation', 'target_position_z')
-#     )
-
-#     # Read PID parameters from [PIDController], including target attitude
-#     pid_params = {
-#         'kp_x': config.getfloat('PIDController', 'kp_x'),
-#         'ki_x': config.getfloat('PIDController', 'ki_x'),
-#         'kd_x': config.getfloat('PIDController', 'kd_x'),
-#         'kp_y': config.getfloat('PIDController', 'kp_y'),
-#         'ki_y': config.getfloat('PIDController', 'ki_y'),
-#         'kd_y': config.getfloat('PIDController', 'kd_y'),
-#         'kp_z': config.getfloat('PIDController', 'kp_z'),
-#         'ki_z': config.getfloat('PIDController', 'ki_z'),
-#         'kd_z': config.getfloat('PIDController', 'kd_z'),
-#         'att_kp_phi': config.getfloat('PIDController', 'att_kp_phi'),
-#         'att_ki_phi': config.getfloat('PIDController', 'att_ki_phi'),
-#         'att_kd_phi': config.getfloat('PIDController', 'att_kd_phi'),
-#         'att_kp_theta': config.getfloat('PIDController', 'att_kp_theta'),
-#         'att_ki_theta': config.getfloat('PIDController', 'att_ki_theta'),
-#         'att_kd_theta': config.getfloat('PIDController', 'att_kd_theta'),
-#         'att_kp_psi': config.getfloat('PIDController', 'att_kp_psi'),
-#         'att_ki_psi': config.getfloat('PIDController', 'att_ki_psi'),
-#         'att_kd_psi': config.getfloat('PIDController', 'att_kd_psi'),
-#         'rate_kp_phi': config.getfloat('PIDController', 'rate_kp_phi'),
-#         'rate_ki_phi': config.getfloat('PIDController', 'rate_ki_phi'),
-#         'rate_kd_phi': config.getfloat('PIDController', 'rate_kd_phi'),
-#         'rate_kp_theta': config.getfloat('PIDController', 'rate_kp_theta'),
-#         'rate_ki_theta': config.getfloat('PIDController', 'rate_ki_theta'),
-#         'rate_kd_theta': config.getfloat('PIDController', 'rate_kd_theta'),
-#         'rate_kp_psi': config.getfloat('PIDController', 'rate_kp_psi'),
-#         'rate_ki_psi': config.getfloat('PIDController', 'rate_ki_psi'),
-#         'rate_kd_psi': config.getfloat('PIDController', 'rate_kd_psi'),
-#         'pid_dt': config.getfloat('PIDController', 'pid_dt'),
-#         # Target attitude; if not set (None or 0 for phi/theta), the computed value from position control is used.
-#         'desired_phi': config.getfloat('PIDController', 'desired_phi') if config.has_option('PIDController', 'desired_phi') else None,
-#         'desired_theta': config.getfloat('PIDController', 'desired_theta') if config.has_option('PIDController', 'desired_theta') else None,
-#         'desired_psi': config.getfloat('PIDController', 'desired_psi')
-#     }
-
-#     # Users can override parameters here (example):
-#     # initial_state[0] = 1.0
-#     # target_position = (0.0, 0.0, 10.0)
-#     # pid_params['kp_x'] = 2.0
-
-#     forces = [
-#         config.getfloat('Simulation', 'forces_u_f'),
-#         config.getfloat('Simulation', 'forces_tau_phi'),
-#         config.getfloat('Simulation', 'forces_tau_theta'),
-#         config.getfloat('Simulation', 'forces_tau_psi')
-#     ]
-
-#     time_span = (
-#         config.getfloat('Simulation', 'time_span_start'),
-#         config.getfloat('Simulation', 'time_span_end')
-#     )
-#     time_eval = np.linspace(time_span[0], time_span[1], config.getint('Simulation', 'time_eval_points'))
-
-#     global pid_controller, iteration_count
-#     iteration_count = 0
-#     pid_controller = DualLoopPIDController(
-#         mass, gravity, target_position,
-#         desired_attitude=(pid_params['desired_phi'], pid_params['desired_theta'], pid_params['desired_psi']),
-#         dt=pid_params['pid_dt'],
-#         kp_x=pid_params['kp_x'], ki_x=pid_params['ki_x'], kd_x=pid_params['kd_x'],
-#         kp_y=pid_params['kp_y'], ki_y=pid_params['ki_y'], kd_y=pid_params['kd_y'],
-#         kp_z=pid_params['kp_z'], ki_z=pid_params['ki_z'], kd_z=pid_params['kd_z'],
-#         att_kp_phi=pid_params['att_kp_phi'], att_ki_phi=pid_params['att_ki_phi'], att_kd_phi=pid_params['att_kd_phi'],
-#         att_kp_theta=pid_params['att_kp_theta'], att_ki_theta=pid_params['att_ki_theta'], att_kd_theta=pid_params['att_kd_theta'],
-#         att_kp_psi=pid_params['att_kp_psi'], att_ki_psi=pid_params['att_ki_psi'], att_kd_psi=pid_params['att_kd_psi'],
-#         rate_kp_phi=pid_params['rate_kp_phi'], rate_ki_phi=pid_params['rate_ki_phi'], rate_kd_phi=pid_params['rate_kd_phi'],
-#         rate_kp_theta=pid_params['rate_kp_theta'], rate_ki_theta=pid_params['rate_ki_theta'], rate_kd_theta=pid_params['rate_kd_theta'],
-#         rate_kp_psi=pid_params['rate_kp_psi'], rate_ki_psi=pid_params['rate_ki_psi'], rate_kd_psi=pid_params['rate_kd_psi']
-#     )
-
-#     drone = DroneSimulation(mass, inertia, drag_coeffs, gravity)
-#     drone.simulate(initial_state, forces, time_span, time_eval, callback=pid_callback)
-
-#     csv_exporter = CSVExporter("simulation_results.csv")
-#     csv_exporter.export(time_eval, drone.solution.y, forces)
-
-#     drone.plot_results()
-#     drone.animate_trajectory()
-
 # ----------------- GUI Code -----------------
 class App:
     def __init__(self, root):
         self.root = root
         self.root.title("UAV Simulation Parameters")
-        # Use a Notebook with three tabs for organization
+        # Create a Notebook with three tabs
         self.notebook = ttk.Notebook(root)
         self.notebook.pack(fill='both', expand=True)
         
@@ -601,7 +473,7 @@ class App:
         }
         self.drone_entries = {}
         self.create_entries(self.drone_frame, self.drone_params, row=0)
-
+        
         # Simulation Parameters Tab
         self.sim_frame = ttk.Frame(self.notebook)
         self.notebook.add(self.sim_frame, text="Simulation Parameters")
@@ -623,11 +495,15 @@ class App:
             "target_position_z": config.get("Simulation", "target_position_z"),
             "time_span_start": config.get("Simulation", "time_span_start"),
             "time_span_end": config.get("Simulation", "time_span_end"),
-            "time_eval_points": config.get("Simulation", "time_eval_points")
+            "time_eval_points": config.get("Simulation", "time_eval_points"),
+            "forces_u_f": config.get("Simulation", "forces_u_f"),
+            "forces_tau_phi": config.get("Simulation", "forces_tau_phi"),
+            "forces_tau_theta": config.get("Simulation", "forces_tau_theta"),
+            "forces_tau_psi": config.get("Simulation", "forces_tau_psi")
         }
         self.sim_entries = {}
         self.create_entries(self.sim_frame, self.sim_params, row=0)
-
+        
         # PID Parameters Tab
         self.pid_frame = ttk.Frame(self.notebook)
         self.notebook.add(self.pid_frame, text="PID Parameters")
@@ -679,14 +555,19 @@ class App:
         self.quit_button.pack(pady=5)
 
     def create_entries(self, parent, param_dict, row=0):
-        """Helper function to create labels and entry fields from a dictionary."""
+        """
+        Create a label and a Spinbox (with up/down arrows) for each parameter.
+        The Spinbox uses an increment of 0.1.
+        """
         for key, val in param_dict.items():
             lbl = ttk.Label(parent, text=key)
             lbl.grid(row=row, column=0, sticky="W", padx=5, pady=2)
-            entry = ttk.Entry(parent)
-            entry.insert(0, str(val))
-            entry.grid(row=row, column=1, padx=5, pady=2)
-            param_dict[key] = entry  # Replace the value with the entry widget
+            # Use tk.Spinbox with a wide range and an increment of 0.1
+            spin = tk.Spinbox(parent, from_=-10000, to=10000, increment=0.1, width=10)
+            spin.delete(0, "end")
+            spin.insert(0, str(val))
+            spin.grid(row=row, column=1, padx=5, pady=2)
+            param_dict[key] = spin
             row += 1
 
     def run_simulation(self):
@@ -720,7 +601,11 @@ class App:
                 "target_position_z": float(self.sim_params["target_position_z"].get()),
                 "time_span_start": float(self.sim_params["time_span_start"].get()),
                 "time_span_end": float(self.sim_params["time_span_end"].get()),
-                "time_eval_points": int(self.sim_params["time_eval_points"].get())
+                "time_eval_points": int(self.sim_params["time_eval_points"].get()),
+                "forces_u_f": float(self.sim_params["forces_u_f"].get()),
+                "forces_tau_phi": float(self.sim_params["forces_tau_phi"].get()),
+                "forces_tau_theta": float(self.sim_params["forces_tau_theta"].get()),
+                "forces_tau_psi": float(self.sim_params["forces_tau_psi"].get())
             }
             # Read PID Parameters
             pid_params = {
@@ -756,7 +641,6 @@ class App:
                 "desired_theta": float(self.pid_params["desired_theta"].get()),
                 "desired_psi": float(self.pid_params["desired_psi"].get())
             }
-            # Build initial state and target position lists
             initial_state = [
                 sim_params["initial_state_x"],
                 sim_params["initial_state_y"],
@@ -776,17 +660,14 @@ class App:
                 sim_params["target_position_y"],
                 sim_params["target_position_z"]
             )
-            # Set initial forces (usually 0)
             forces = [
-                float(self.sim_params["forces_u_f"].get()) if "forces_u_f" in self.sim_params else 0,
-                float(self.sim_params["forces_tau_phi"].get()) if "forces_tau_phi" in self.sim_params else 0,
-                float(self.sim_params["forces_tau_theta"].get()) if "forces_tau_theta" in self.sim_params else 0,
-                float(self.sim_params["forces_tau_psi"].get()) if "forces_tau_psi" in self.sim_params else 0
+                sim_params["forces_u_f"],
+                sim_params["forces_tau_phi"],
+                sim_params["forces_tau_theta"],
+                sim_params["forces_tau_psi"]
             ]
-            # Create time evaluation array
             time_eval = np.linspace(sim_params["time_span_start"], sim_params["time_span_end"], sim_params["time_eval_points"])
             
-            # Initialize global PID controller
             global pid_controller, iteration_count
             iteration_count = 0
             pid_controller = DualLoopPIDController(
@@ -806,20 +687,18 @@ class App:
                 rate_kp_psi=pid_params["rate_kp_psi"], rate_ki_psi=pid_params["rate_ki_psi"], rate_kd_psi=pid_params["rate_kd_psi"]
             )
             
-            # Initialize UAV simulation object and run simulation
             drone = DroneSimulation(
                 mass=drone_params["mass"],
                 inertia=(drone_params["inertia_x"], drone_params["inertia_y"], drone_params["inertia_z"]),
                 drag_coeffs=(drone_params["drag_coeff_linear"], drone_params["drag_coeff_angular"]),
                 gravity=drone_params["gravity"]
             )
-            drone.simulate(initial_state, forces, 
-                           (sim_params["time_span_start"], sim_params["time_span_end"]),
+            drone.simulate(initial_state, forces, (sim_params["time_span_start"], sim_params["time_span_end"]),
                            time_eval, callback=pid_callback)
             
-            # Export CSV, plot results and animate trajectory
             csv_exporter = CSVExporter("simulation_results.csv")
             csv_exporter.export(time_eval, drone.solution.y, forces)
+            
             drone.plot_results()
             drone.animate_trajectory()
         except Exception as e:
