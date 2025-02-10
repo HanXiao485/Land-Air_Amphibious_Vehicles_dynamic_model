@@ -16,25 +16,65 @@ config = configparser.ConfigParser()
 config.read(file_path)
 
 ########################################################################
+# Fourth-order Runge-Kutta Integrator Class (with callback)
+########################################################################
+class RK4Integrator:
+    """
+    Fourth-order Runge-Kutta integrator.
+    After each integration step, calls a callback function to update the control input.
+    """
+    def __init__(self, func, forces):
+        self.func = func
+        self.forces = forces
+        self.states = []
+
+    def integrate(self, time_eval, initial_state, callback=None):
+        dt = time_eval[1] - time_eval[0]
+        state = np.array(initial_state)
+        self.states = []
+        for idx in range(len(time_eval) - 1):
+            self.states.append(state.copy())
+            t_current = time_eval[idx]
+            k1 = np.array(self.func(t_current, state, self.forces))
+            k2 = np.array(self.func(t_current + dt/2, state + dt/2 * k1, self.forces))
+            k3 = np.array(self.func(t_current + dt/2, state + dt/2 * k2, self.forces))
+            k4 = np.array(self.func(t_current + dt, state + dt * k3, self.forces))
+            new_state = state + (dt/6) * (k1 + 2*k2 + 2*k3 + k4)
+            if new_state[2] < 0:
+                new_state[2] = 0
+                new_state[5] = 0
+            if callback is not None:
+                new_forces = callback(time_eval[idx+1], new_state, self.forces)
+                if new_forces is not None:
+                    self.forces = new_forces
+            state = new_state
+        self.states.append(state.copy())
+        return time_eval, np.array(self.states)
+
+########################################################################
 # PID Controller Class with Three Loops (Position, Attitude, Rate)
 ########################################################################
 class DualLoopPIDController:
     """
-    Three-loop PID controller:
+    Four-loop PID controller:
       - Outer loop (Position control): calculates desired acceleration based on position error,
-        then computes the desired roll and pitch angles using small-angle approximation.
-      - Middle loop (Attitude control): calculates desired angular rates from the attitude error
-        using full PID control (proportional, integral, derivative).
+        then computes the desired velocity.
+      - Second loop (Velocity control): calculates desired velocity based on velocity error.
+      - Middle loop (Attitude control): calculates desired angular rates based on attitude error.
       - Inner loop (Rate control): calculates control moments from angular rate errors via PID control.
       
       The total lift force is computed as:
           u_f = mass * (g + a_z_des)
     """
-    def __init__(self, mass, gravity, desired_position, desired_attitude, dt,
+    def __init__(self, mass, gravity, desired_position, desired_velocity, desired_attitude, dt,
                  # Outer loop PID parameters (Position control)
                  kp_x=1.0, ki_x=0.0, kd_x=0.5,
                  kp_y=1.0, ki_y=0.0, kd_y=0.5,
                  kp_z=2.0, ki_z=0.0, kd_z=1.0,
+                 # Second loop PID parameters (Velocity control)
+                 kp_vx=1.0, ki_vx=0.0, kd_vx=0.5,
+                 kp_vy=1.0, ki_vy=0.0, kd_vy=0.5,
+                 kp_vz=2.0, ki_vz=0.0, kd_vz=1.0,
                  # Middle loop PID parameters (Attitude control)
                  att_kp_phi=5.0, att_ki_phi=0.1, att_kd_phi=2.0,
                  att_kp_theta=5.0, att_ki_theta=0.1, att_kd_theta=2.0,
@@ -46,6 +86,7 @@ class DualLoopPIDController:
         self.mass = mass
         self.g = gravity
         self.desired_position = desired_position      # Target position: (x_des, y_des, z_des)
+        self.desired_velocity = desired_velocity      # Target velocity: (vx_des, vy_des, vz_des)
         self.desired_attitude = desired_attitude      # Target attitude: (phi_des, theta_des, psi_des)
         self.dt = dt
 
@@ -54,27 +95,34 @@ class DualLoopPIDController:
         self.Kp_y = kp_y; self.Ki_y = ki_y; self.Kd_y = kd_y
         self.Kp_z = kp_z; self.Ki_z = ki_z; self.Kd_z = kd_z
 
+        # Second loop PID parameters (Velocity control)
+        self.Kp_vx = kp_vx; self.Ki_vx = ki_vx; self.Kd_vx = kd_vx
+        self.Kp_vy = kp_vy; self.Ki_vy = ki_vy; self.Kd_vy = kd_vy
+        self.Kp_vz = kp_vz; self.Ki_vz = ki_vz; self.Kd_vz = kd_vz
+
         # Middle loop PID parameters (Attitude control)
         self.att_kp_phi = att_kp_phi; self.att_ki_phi = att_ki_phi; self.att_kd_phi = att_kd_phi
         self.att_kp_theta = att_kp_theta; self.att_ki_theta = att_ki_theta; self.att_kd_theta = att_kd_theta
         self.att_kp_psi = att_kp_psi; self.att_ki_psi = att_ki_psi; self.att_kd_psi = att_kd_psi
-
-        # Initialize middle loop integration and previous error (Attitude control)
-        self.int_phi_att = 0.0; self.last_error_phi_att = 0.0
-        self.int_theta_att = 0.0; self.last_error_theta_att = 0.0
-        self.int_psi_att = 0.0; self.last_error_psi_att = 0.0
 
         # Inner loop PID parameters (Angular rate control)
         self.rate_kp_phi = rate_kp_phi; self.rate_ki_phi = rate_ki_phi; self.rate_kd_phi = rate_kd_phi
         self.rate_kp_theta = rate_kp_theta; self.rate_ki_theta = rate_ki_theta; self.rate_kd_theta = rate_kd_theta
         self.rate_kp_psi = rate_kp_psi; self.rate_ki_psi = rate_ki_psi; self.rate_kd_psi = rate_kd_psi
 
-        # Initialize outer loop integration and previous error (Position control)
+        # Initialize integrations and previous errors
         self.int_x = 0.0; self.last_error_x = 0.0
         self.int_y = 0.0; self.last_error_y = 0.0
         self.int_z = 0.0; self.last_error_z = 0.0
 
-        # Initialize inner loop integration and previous error (Angular rate control)
+        self.int_vx = 0.0; self.last_error_vx = 0.0
+        self.int_vy = 0.0; self.last_error_vy = 0.0
+        self.int_vz = 0.0; self.last_error_vz = 0.0
+
+        self.int_phi_att = 0.0; self.last_error_phi_att = 0.0
+        self.int_theta_att = 0.0; self.last_error_theta_att = 0.0
+        self.int_psi_att = 0.0; self.last_error_psi_att = 0.0
+
         self.int_p = 0.0; self.last_error_p = 0.0
         self.int_q = 0.0; self.last_error_q = 0.0
         self.int_r = 0.0; self.last_error_r = 0.0
@@ -96,6 +144,7 @@ class DualLoopPIDController:
         # Extract state variables
         x, y, z, dx, dy, dz, phi, theta, psi, p, q, r = state
         x_des, y_des, z_des = self.desired_position
+        vx_des, vy_des, vz_des = self.desired_velocity
 
         # Outer loop: Position control
         error_x = x_des - x
@@ -114,17 +163,36 @@ class DualLoopPIDController:
         self.last_error_y = error_y
         self.last_error_z = error_z
 
-        ax_des = self.Kp_x * error_x + self.Ki_x * self.int_x + self.Kd_x * d_error_x
-        ay_des = self.Kp_y * error_y + self.Ki_y * self.int_y + self.Kd_y * d_error_y
-        az_des = self.Kp_z * error_z + self.Ki_z * self.int_z + self.Kd_z * d_error_z
+        # Compute desired velocity for the velocity control loop
+        vx_des = self.Kp_x * error_x + self.Ki_x * self.int_x + self.Kd_x * d_error_x
+        vy_des = self.Kp_y * error_y + self.Ki_y * self.int_y + self.Kd_y * d_error_y
+        vz_des = self.Kp_z * error_z + self.Ki_z * self.int_z + self.Kd_z * d_error_z
 
-        # Compute desired attitude from position control using small-angle approximation.
-        # For x-axis acceleration: x acceleration ~ (u_f/m)*theta.
-        # To get positive acceleration in x, desired theta should be positive.
+        # Second loop: Velocity control
+        error_vx = vx_des - dx
+        error_vy = vy_des - dy
+        error_vz = vz_des - dz
+
+        self.int_vx += error_vx * dt
+        self.int_vy += error_vy * dt
+        self.int_vz += error_vz * dt
+
+        d_error_vx = (error_vx - self.last_error_vx) / dt
+        d_error_vy = (error_vy - self.last_error_vy) / dt
+        d_error_vz = (error_vz - self.last_error_vz) / dt
+
+        self.last_error_vx = error_vx
+        self.last_error_vy = error_vy
+        self.last_error_vz = error_vz
+        
+        ax_des = self.Kp_vx * error_vx + self.Ki_vx * self.int_vx + self.Kd_vx * d_error_vx
+        ay_des = self.Kp_vy * error_vy + self.Ki_vy * self.int_vy + self.Kd_vy * d_error_vy
+        az_des = self.Kp_vz * error_vz + self.Ki_vz * self.int_vz + self.Kd_vz * d_error_vz
+
+        # Compute desired attitude based on velocity control
         phi_des_pos = (1.0 / self.g) * ay_des
-        theta_des_pos = (1.0 / self.g) * ax_des  # Removed negative sign to correct x-axis motion
+        theta_des_pos = (1.0 / self.g) * ax_des
 
-        # Use computed values if target roll/pitch are set to 0.
         if self.desired_attitude[0] == 0:
             phi_des = phi_des_pos
         else:
@@ -135,7 +203,7 @@ class DualLoopPIDController:
             theta_des = self.desired_attitude[1]
         psi_des = self.desired_attitude[2]
 
-        # Middle loop: Attitude control with full PID
+        # Middle loop: Attitude control
         error_phi = phi_des - phi
         error_theta = theta_des - theta
         error_psi = psi_des - psi
@@ -177,117 +245,12 @@ class DualLoopPIDController:
         tau_theta = self.rate_kp_theta * error_q + self.rate_ki_theta * self.int_q + self.rate_kd_theta * d_error_q
         tau_psi = self.rate_kp_psi * error_r + self.rate_ki_psi * self.int_r + self.rate_kd_psi * d_error_r
 
-        u_f = self.mass * (self.g + az_des)
+        # Update the calculation of lift force to allow free fall when no control is set
+        u_f = self.mass * (-self.g + az_des) if az_des is not None else 0  # Allow free fall if no desired acceleration
+        print("u_f: ", u_f)
 
         return [u_f, tau_phi, tau_theta, tau_psi]
-
-########################################################################
-# PID Callback Handler Class
-########################################################################
-class PIDCallbackHandler:
-    """
-    Encapsulates the callback function for the simulation.
-    This class handles the operations to be performed at the end of each integration step,
-    including printing the current time and UAV state, updating PID controller parameters,
-    and returning the updated control inputs.
-    """
-    def __init__(self, pid_controller):
-        self.pid_controller = pid_controller
-        self.iteration_count = 0
-
-    def callback(self, current_time, current_state, current_forces):
-        self.iteration_count += 1
-        print("Iteration: {}, Time: {:.3f}, State: {}".format(self.iteration_count, current_time, current_state))
-        # Example: update PID parameters if needed (adjust outer loop Kp_x)
-        # self.pid_controller.Kp_x = 1.0 + 0.0001 * self.iteration_count
-        new_forces = self.pid_controller.update(current_time, current_state)
-        return new_forces
-
-########################################################################
-# Fourth-order Runge-Kutta Integrator Class (with callback)
-########################################################################
-class RK4Integrator:
-    """
-    Fourth-order Runge-Kutta integrator.
-    After each integration step, calls a callback function to update the control input.
-    """
-    def __init__(self, func, forces):
-        self.func = func
-        self.forces = forces
-        self.states = []
-
-    def integrate(self, time_eval, initial_state, callback=None):
-        dt = time_eval[1] - time_eval[0]
-        state = np.array(initial_state)
-        self.states = []
-        for idx in range(len(time_eval) - 1):
-            self.states.append(state.copy())
-            t_current = time_eval[idx]
-            k1 = np.array(self.func(t_current, state, self.forces))
-            k2 = np.array(self.func(t_current + dt/2, state + dt/2 * k1, self.forces))
-            k3 = np.array(self.func(t_current + dt/2, state + dt/2 * k2, self.forces))
-            k4 = np.array(self.func(t_current + dt, state + dt * k3, self.forces))
-            new_state = state + (dt/6) * (k1 + 2*k2 + 2*k3 + k4)
-            if new_state[2] < 0:
-                new_state[2] = 0
-                new_state[5] = 0
-            if callback is not None:
-                new_forces = callback(time_eval[idx+1], new_state, self.forces)
-                if new_forces is not None:
-                    self.forces = new_forces
-            state = new_state
-        self.states.append(state.copy())
-        return time_eval, np.array(self.states)
-
-########################################################################
-# CSV Exporter Class
-########################################################################
-class CSVExporter:
-    """
-    Exports the UAV state and control inputs at each time step to a CSV file.
-    """
-    def __init__(self, filename, headers=None):
-        """
-        Initializes the CSVExporter object with a filename and optional headers.
-        If no headers are provided, default headers are used.
-        """
-        if headers is None:
-            self.headers = ['time', 'x', 'y', 'z', 'dx', 'dy', 'dz',
-                            'phi', 'theta', 'psi', 'p', 'q', 'r',
-                            'lift_force', 'tau_phi', 'tau_theta', 'tau_psi']
-        else:
-            self.headers = headers
-        self.filename = filename
-
-    def export(self, time_eval, state_matrix, forces):
-        """
-        Exports the UAV state and control inputs at each time step to a CSV file.
-        """
-        n_steps = len(time_eval)
-        with open(self.filename, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(self.headers)
-            for i in range(n_steps):
-                row = [
-                    time_eval[i],
-                    state_matrix[0][i],
-                    state_matrix[1][i],
-                    state_matrix[2][i],
-                    state_matrix[3][i],
-                    state_matrix[4][i],
-                    state_matrix[5][i],
-                    state_matrix[6][i],
-                    state_matrix[7][i],
-                    state_matrix[8][i],
-                    state_matrix[9][i],
-                    state_matrix[10][i],
-                    state_matrix[11][i],
-                    forces[0],
-                    forces[1],
-                    forces[2],
-                    forces[3]
-                ]
-                writer.writerow(row)
+    
 
 ########################################################################
 # UAV Simulation Class
@@ -383,10 +346,18 @@ class DroneSimulation:
         plt.tight_layout()
         plt.show()
 
-    def animate_trajectory(self):
+    def animate_trajectory(self, animation_speed=1.0):
+        """
+        Animate the UAV trajectory.
+        The animation speed is adjusted by the factor animation_speed.
+        The interval is computed as base_interval / animation_speed.
+        """
         solution = self.solution
         x, y, z = solution.y[0], solution.y[1], solution.y[2]
         phi, theta, psi = solution.y[6], solution.y[7], solution.y[8]
+
+        # Base interval is 50 ms; adjust by animation_speed factor.
+        interval = int(50 / animation_speed) if animation_speed > 0 else 50
 
         fig = plt.figure(figsize=(10, 8))
         ax = fig.add_subplot(111, projection='3d')
@@ -455,12 +426,91 @@ class DroneSimulation:
             real_time_axes = draw_axes(center, R, alpha=0.9)
             return trajectory_line, *real_time_axes
 
-        ani = FuncAnimation(fig, update, frames=len(self.time_eval), init_func=init, blit=False, interval=50)
+        ani = FuncAnimation(fig, update, frames=len(self.time_eval), init_func=init, blit=False, interval=interval)
         plt.legend()
         plt.show()
+        
+        
+########################################################################
+# CSV Exporter Class
+########################################################################
+class CSVExporter:
+    """
+    Exports the UAV state and control inputs at each time step to a CSV file.
+    """
+    def __init__(self, filename, headers=None):
+        """
+        Initializes the CSVExporter object with a filename and optional headers.
+        If no headers are provided, default headers are used.
+        """
+        if headers is None:
+            self.headers = ['time', 'x', 'y', 'z', 'dx', 'dy', 'dz',
+                            'phi', 'theta', 'psi', 'p', 'q', 'r',
+                            'lift_force', 'tau_phi', 'tau_theta', 'tau_psi']
+        else:
+            self.headers = headers
+        self.filename = filename
 
-# ----------------- End Simulation Classes -----------------
+    def export(self, time_eval, state_matrix, forces):
+        """
+        Exports the UAV state and control inputs at each time step to a CSV file.
+        """
+        n_steps = len(time_eval)
+        with open(self.filename, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(self.headers)
+            for i in range(n_steps):
+                row = [
+                    time_eval[i],
+                    state_matrix[0][i],
+                    state_matrix[1][i],
+                    state_matrix[2][i],
+                    state_matrix[3][i],
+                    state_matrix[4][i],
+                    state_matrix[5][i],
+                    state_matrix[6][i],
+                    state_matrix[7][i],
+                    state_matrix[8][i],
+                    state_matrix[9][i],
+                    state_matrix[10][i],
+                    state_matrix[11][i],
+                    forces[0],
+                    forces[1],
+                    forces[2],
+                    forces[3]
+                ]
+                writer.writerow(row)
+                
+                
+########################################################################
+# PID Callback Handler Class
+########################################################################
+class PIDCallbackHandler:
+    """
+    Encapsulates the callback function for the simulation.
+    All callback operations (printing state, updating PID parameters, etc.)
+    are implemented in this class.
+    """
+    def __init__(self, pid_controller, flight_mode="Fixed Point", trajectory_planner=None):
+        self.pid_controller = pid_controller
+        self.iteration_count = 0
+        self.flight_mode = flight_mode  # "Fixed Point" or "Curve Tracking"
+        self.trajectory_planner = trajectory_planner
 
+    def callback(self, current_time, current_state, current_forces):
+        self.iteration_count += 1
+        # print("Iteration: {}, Time: {:.3f}, State: {}".format(self.iteration_count, current_time, current_state))
+        # Example: update PID parameter Kp_x dynamically if needed
+        # self.pid_controller.Kp_x = 1.0 + 0.0001 * self.iteration_count
+        
+        # If in Curve Tracking mode, update desired position based on trajectory
+        if self.flight_mode == "Curve Tracking" and self.trajectory_planner is not None:
+            new_target = self.trajectory_planner.get_target_position(current_time)
+            self.pid_controller.desired_position = new_target
+        new_forces = self.pid_controller.update(current_time, current_state)
+        return new_forces
+    
+    
 # ----------------- GUI Code -----------------
 class App:
     def __init__(self, root):
@@ -504,13 +554,17 @@ class App:
             "target_position_x": config.get("Simulation", "target_position_x"),
             "target_position_y": config.get("Simulation", "target_position_y"),
             "target_position_z": config.get("Simulation", "target_position_z"),
+            "target_velocity_x": config.get("Simulation", "target_velocity_x"),
+            "target_velocity_y": config.get("Simulation", "target_velocity_y"),
+            "target_velocity_z": config.get("Simulation", "target_velocity_z"),
             "time_span_start": config.get("Simulation", "time_span_start"),
             "time_span_end": config.get("Simulation", "time_span_end"),
             "time_eval_points": config.get("Simulation", "time_eval_points"),
             "forces_u_f": config.get("Simulation", "forces_u_f"),
             "forces_tau_phi": config.get("Simulation", "forces_tau_phi"),
             "forces_tau_theta": config.get("Simulation", "forces_tau_theta"),
-            "forces_tau_psi": config.get("Simulation", "forces_tau_psi")
+            "forces_tau_psi": config.get("Simulation", "forces_tau_psi"),
+            "animation_speed": config.get("Simulation", "animation_speed")  # New parameter for animation speed
         }
         self.sim_entries = {}
         self.create_entries(self.sim_frame, self.sim_params, row=0)
@@ -529,6 +583,16 @@ class App:
             "kp_z": config.get("PIDController", "kp_z"),
             "ki_z": config.get("PIDController", "ki_z"),
             "kd_z": config.get("PIDController", "kd_z"),
+            # Second loop (Velocity control)
+            "kp_vx": config.get("PIDController", "kp_vx"),
+            "ki_vx": config.get("PIDController", "ki_vx"),
+            "kd_vx": config.get("PIDController", "kd_vx"),
+            "kp_vy": config.get("PIDController", "kp_vy"),
+            "ki_vy": config.get("PIDController", "ki_vy"),
+            "kd_vy": config.get("PIDController", "kd_vy"),
+            "kp_vz": config.get("PIDController", "kp_vz"),
+            "ki_vz": config.get("PIDController", "ki_vz"),
+            "kd_vz": config.get("PIDController", "kd_vz"),
             # Middle loop (Attitude control)
             "att_kp_phi": config.get("PIDController", "att_kp_phi"),
             "att_ki_phi": config.get("PIDController", "att_ki_phi"),
@@ -566,7 +630,7 @@ class App:
         self.quit_button.pack(pady=5)
 
     def create_entries(self, parent, param_dict, row=0):
-        """Create a label and a Spinbox (with arrow buttons) for each parameter with increment 0.1."""
+        """Create a label and a Spinbox with increment 0.1 for each parameter."""
         for key, val in param_dict.items():
             lbl = ttk.Label(parent, text=key)
             lbl.grid(row=row, column=0, sticky="W", padx=5, pady=2)
@@ -606,13 +670,17 @@ class App:
                 "target_position_x": float(self.sim_params["target_position_x"].get()),
                 "target_position_y": float(self.sim_params["target_position_y"].get()),
                 "target_position_z": float(self.sim_params["target_position_z"].get()),
+                "target_velocity_x": float(self.sim_params["target_velocity_x"].get()),
+                "target_velocity_y": float(self.sim_params["target_velocity_y"].get()),
+                "target_velocity_z": float(self.sim_params["target_velocity_z"].get()),
                 "time_span_start": float(self.sim_params["time_span_start"].get()),
                 "time_span_end": float(self.sim_params["time_span_end"].get()),
                 "time_eval_points": int(self.sim_params["time_eval_points"].get()),
                 "forces_u_f": float(self.sim_params["forces_u_f"].get()),
                 "forces_tau_phi": float(self.sim_params["forces_tau_phi"].get()),
                 "forces_tau_theta": float(self.sim_params["forces_tau_theta"].get()),
-                "forces_tau_psi": float(self.sim_params["forces_tau_psi"].get())
+                "forces_tau_psi": float(self.sim_params["forces_tau_psi"].get()),
+                "animation_speed": float(self.sim_params["animation_speed"].get())
             }
             # Read PID Parameters
             pid_params = {
@@ -625,6 +693,15 @@ class App:
                 "kp_z": float(self.pid_params["kp_z"].get()),
                 "ki_z": float(self.pid_params["ki_z"].get()),
                 "kd_z": float(self.pid_params["kd_z"].get()),
+                "kp_vx": float(self.pid_params["kp_vx"].get()),
+                "ki_vx": float(self.pid_params["ki_vx"].get()),
+                "kd_vx": float(self.pid_params["kd_vx"].get()),
+                "kp_vy": float(self.pid_params["kp_vy"].get()),
+                "ki_vy": float(self.pid_params["ki_vy"].get()),
+                "kd_vy": float(self.pid_params["kd_vy"].get()),
+                "kp_vz": float(self.pid_params["kp_vz"].get()),
+                "ki_vz": float(self.pid_params["ki_vz"].get()),
+                "kd_vz": float(self.pid_params["kd_vz"].get()),
                 "att_kp_phi": float(self.pid_params["att_kp_phi"].get()),
                 "att_ki_phi": float(self.pid_params["att_ki_phi"].get()),
                 "att_kd_phi": float(self.pid_params["att_kd_phi"].get()),
@@ -667,6 +744,11 @@ class App:
                 sim_params["target_position_y"],
                 sim_params["target_position_z"]
             )
+            target_velocity = (
+                sim_params["target_velocity_x"],
+                sim_params["target_velocity_y"],
+                sim_params["target_velocity_z"]
+            )
             forces = [
                 sim_params["forces_u_f"],
                 sim_params["forces_tau_phi"],
@@ -681,11 +763,15 @@ class App:
                 mass=drone_params["mass"],
                 gravity=drone_params["gravity"],
                 desired_position=target_position,
+                desired_velocity=target_velocity,
                 desired_attitude=(pid_params["desired_phi"], pid_params["desired_theta"], pid_params["desired_psi"]),
                 dt=pid_params["pid_dt"],
                 kp_x=pid_params["kp_x"], ki_x=pid_params["ki_x"], kd_x=pid_params["kd_x"],
                 kp_y=pid_params["kp_y"], ki_y=pid_params["ki_y"], kd_y=pid_params["kd_y"],
                 kp_z=pid_params["kp_z"], ki_z=pid_params["ki_z"], kd_z=pid_params["kd_z"],
+                kp_vx=pid_params["kp_vx"], ki_vx=pid_params["ki_vx"], kd_vx=pid_params["kd_vx"],
+                kp_vy=pid_params["kp_vy"], ki_vy=pid_params["ki_vy"], kd_vy=pid_params["kd_vy"],
+                kp_vz=pid_params["kp_vz"], ki_vz=pid_params["ki_vz"], kd_vz=pid_params["kd_vz"],
                 att_kp_phi=pid_params["att_kp_phi"], att_ki_phi=pid_params["att_ki_phi"], att_kd_phi=pid_params["att_kd_phi"],
                 att_kp_theta=pid_params["att_kp_theta"], att_ki_theta=pid_params["att_ki_theta"], att_kd_theta=pid_params["att_kd_theta"],
                 att_kp_psi=pid_params["att_kp_psi"], att_ki_psi=pid_params["att_ki_psi"], att_kd_psi=pid_params["att_kd_psi"],
@@ -694,7 +780,7 @@ class App:
                 rate_kp_psi=pid_params["rate_kp_psi"], rate_ki_psi=pid_params["rate_ki_psi"], rate_kd_psi=pid_params["rate_kd_psi"]
             )
             
-            # Instantiate a PID callback handler object
+            # Create PID callback handler instance
             callback_handler = PIDCallbackHandler(pid_controller)
             
             drone = DroneSimulation(
@@ -703,35 +789,20 @@ class App:
                 drag_coeffs=(drone_params["drag_coeff_linear"], drone_params["drag_coeff_angular"]),
                 gravity=drone_params["gravity"]
             )
-            drone.simulate(initial_state, forces,
-                           (sim_params["time_span_start"], sim_params["time_span_end"]),
+            drone.simulate(initial_state, forces, (sim_params["time_span_start"], sim_params["time_span_end"]),
                            time_eval, callback=callback_handler.callback)
             
             csv_exporter = CSVExporter("simulation_results.csv")
             csv_exporter.export(time_eval, drone.solution.y, forces)
             
             drone.plot_results()
-            drone.animate_trajectory()
+            # Pass animation speed from simulation parameters to animate_trajectory
+            animation_speed = sim_params["animation_speed"]
+            drone.animate_trajectory(animation_speed=animation_speed)
         except Exception as e:
             messagebox.showerror("Error", str(e))
-
-class PIDCallbackHandler:
-    """
-    Encapsulates the callback function for the simulation.
-    All callback operations are implemented in this class.
-    """
-    def __init__(self, pid_controller):
-        self.pid_controller = pid_controller
-        self.iteration_count = 0
-
-    def callback(self, current_time, current_state, current_forces):
-        self.iteration_count += 1
-        print("Iteration: {}, Time: {:.3f}, State: {}".format(self.iteration_count, current_time, current_state))
-        # Example: update PID parameter Kp_x dynamically
-        # self.pid_controller.Kp_x = 1.0 + 0.0001 * self.iteration_count
-        new_forces = self.pid_controller.update(current_time, current_state)
-        return new_forces
-
+            
+            
 def main():
     root = tk.Tk()
     app = App(root)

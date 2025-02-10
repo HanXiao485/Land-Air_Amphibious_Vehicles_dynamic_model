@@ -13,21 +13,25 @@ from tkinter import messagebox
 ########################################################################
 class DualLoopPIDController:
     """
-    Three-loop PID controller:
+    Four-loop PID controller:
       - Outer loop (Position control): calculates desired acceleration based on position error,
-        then computes the desired roll and pitch angles using small-angle approximation.
-      - Middle loop (Attitude control): calculates desired angular rates from the attitude error
-        using full PID control (proportional, integral, derivative).
+        then computes the desired velocity.
+      - Second loop (Velocity control): calculates desired velocity based on velocity error.
+      - Middle loop (Attitude control): calculates desired angular rates based on attitude error.
       - Inner loop (Rate control): calculates control moments from angular rate errors via PID control.
       
       The total lift force is computed as:
           u_f = mass * (g + a_z_des)
     """
-    def __init__(self, mass, gravity, desired_position, desired_attitude, dt,
+    def __init__(self, mass, gravity, desired_position, desired_velocity, desired_attitude, dt,
                  # Outer loop PID parameters (Position control)
                  kp_x=1.0, ki_x=0.0, kd_x=0.5,
                  kp_y=1.0, ki_y=0.0, kd_y=0.5,
                  kp_z=2.0, ki_z=0.0, kd_z=1.0,
+                 # Second loop PID parameters (Velocity control)
+                 kp_vx=1.0, ki_vx=0.0, kd_vx=0.5,
+                 kp_vy=1.0, ki_vy=0.0, kd_vy=0.5,
+                 kp_vz=2.0, ki_vz=0.0, kd_vz=1.0,
                  # Middle loop PID parameters (Attitude control)
                  att_kp_phi=5.0, att_ki_phi=0.1, att_kd_phi=2.0,
                  att_kp_theta=5.0, att_ki_theta=0.1, att_kd_theta=2.0,
@@ -39,6 +43,7 @@ class DualLoopPIDController:
         self.mass = mass
         self.g = gravity
         self.desired_position = desired_position      # Target position: (x_des, y_des, z_des)
+        self.desired_velocity = desired_velocity      # Target velocity: (vx_des, vy_des, vz_des)
         self.desired_attitude = desired_attitude      # Target attitude: (phi_des, theta_des, psi_des)
         self.dt = dt
 
@@ -47,27 +52,34 @@ class DualLoopPIDController:
         self.Kp_y = kp_y; self.Ki_y = ki_y; self.Kd_y = kd_y
         self.Kp_z = kp_z; self.Ki_z = ki_z; self.Kd_z = kd_z
 
+        # Second loop PID parameters (Velocity control)
+        self.Kp_vx = kp_vx; self.Ki_vx = ki_vx; self.Kd_vx = kd_vx
+        self.Kp_vy = kp_vy; self.Ki_vy = ki_vy; self.Kd_vy = kd_vy
+        self.Kp_vz = kp_vz; self.Ki_vz = ki_vz; self.Kd_vz = kd_vz
+
         # Middle loop PID parameters (Attitude control)
         self.att_kp_phi = att_kp_phi; self.att_ki_phi = att_ki_phi; self.att_kd_phi = att_kd_phi
         self.att_kp_theta = att_kp_theta; self.att_ki_theta = att_ki_theta; self.att_kd_theta = att_kd_theta
         self.att_kp_psi = att_kp_psi; self.att_ki_psi = att_ki_psi; self.att_kd_psi = att_kd_psi
-
-        # Initialize middle loop integration and previous error (Attitude control)
-        self.int_phi_att = 0.0; self.last_error_phi_att = 0.0
-        self.int_theta_att = 0.0; self.last_error_theta_att = 0.0
-        self.int_psi_att = 0.0; self.last_error_psi_att = 0.0
 
         # Inner loop PID parameters (Angular rate control)
         self.rate_kp_phi = rate_kp_phi; self.rate_ki_phi = rate_ki_phi; self.rate_kd_phi = rate_kd_phi
         self.rate_kp_theta = rate_kp_theta; self.rate_ki_theta = rate_ki_theta; self.rate_kd_theta = rate_kd_theta
         self.rate_kp_psi = rate_kp_psi; self.rate_ki_psi = rate_ki_psi; self.rate_kd_psi = rate_kd_psi
 
-        # Initialize outer loop integration and previous error (Position control)
+        # Initialize integrations and previous errors
         self.int_x = 0.0; self.last_error_x = 0.0
         self.int_y = 0.0; self.last_error_y = 0.0
         self.int_z = 0.0; self.last_error_z = 0.0
 
-        # Initialize inner loop integration and previous error (Angular rate control)
+        self.int_vx = 0.0; self.last_error_vx = 0.0
+        self.int_vy = 0.0; self.last_error_vy = 0.0
+        self.int_vz = 0.0; self.last_error_vz = 0.0
+
+        self.int_phi_att = 0.0; self.last_error_phi_att = 0.0
+        self.int_theta_att = 0.0; self.last_error_theta_att = 0.0
+        self.int_psi_att = 0.0; self.last_error_psi_att = 0.0
+
         self.int_p = 0.0; self.last_error_p = 0.0
         self.int_q = 0.0; self.last_error_q = 0.0
         self.int_r = 0.0; self.last_error_r = 0.0
@@ -89,6 +101,7 @@ class DualLoopPIDController:
         # Extract state variables
         x, y, z, dx, dy, dz, phi, theta, psi, p, q, r = state
         x_des, y_des, z_des = self.desired_position
+        vx_des, vy_des, vz_des = self.desired_velocity
 
         # Outer loop: Position control
         error_x = x_des - x
@@ -107,17 +120,36 @@ class DualLoopPIDController:
         self.last_error_y = error_y
         self.last_error_z = error_z
 
-        ax_des = self.Kp_x * error_x + self.Ki_x * self.int_x + self.Kd_x * d_error_x
-        ay_des = self.Kp_y * error_y + self.Ki_y * self.int_y + self.Kd_y * d_error_y
-        az_des = self.Kp_z * error_z + self.Ki_z * self.int_z + self.Kd_z * d_error_z
+        # Compute desired velocity for the velocity control loop
+        vx_des = self.Kp_x * error_x + self.Ki_x * self.int_x + self.Kd_x * d_error_x
+        vy_des = self.Kp_y * error_y + self.Ki_y * self.int_y + self.Kd_y * d_error_y
+        vz_des = self.Kp_z * error_z + self.Ki_z * self.int_z + self.Kd_z * d_error_z
 
-        # Compute desired attitude from position control using small-angle approximation.
-        # For x-axis acceleration: x acceleration ~ (u_f/m)*theta.
-        # To get positive acceleration in x, desired theta should be positive.
+        # Second loop: Velocity control
+        error_vx = vx_des - dx
+        error_vy = vy_des - dy
+        error_vz = vz_des - dz
+
+        self.int_vx += error_vx * dt
+        self.int_vy += error_vy * dt
+        self.int_vz += error_vz * dt
+
+        d_error_vx = (error_vx - self.last_error_vx) / dt
+        d_error_vy = (error_vy - self.last_error_vy) / dt
+        d_error_vz = (error_vz - self.last_error_vz) / dt
+
+        self.last_error_vx = error_vx
+        self.last_error_vy = error_vy
+        self.last_error_vz = error_vz
+        
+        ax_des = self.Kp_vx * error_vx + self.Ki_vx * self.int_vx + self.Kd_vx * d_error_vx
+        ay_des = self.Kp_vy * error_vy + self.Ki_vy * self.int_vy + self.Kd_vy * d_error_vy
+        az_des = self.Kp_vz * error_vz + self.Ki_vz * self.int_vz + self.Kd_vz * d_error_vz
+
+        # Compute desired attitude based on velocity control
         phi_des_pos = (1.0 / self.g) * ay_des
-        theta_des_pos = (1.0 / self.g) * ax_des  # Removed negative sign to correct x-axis motion
+        theta_des_pos = (1.0 / self.g) * ax_des
 
-        # Use computed values if target roll/pitch are set to 0.
         if self.desired_attitude[0] == 0:
             phi_des = phi_des_pos
         else:
@@ -128,7 +160,7 @@ class DualLoopPIDController:
             theta_des = self.desired_attitude[1]
         psi_des = self.desired_attitude[2]
 
-        # Middle loop: Attitude control with full PID
+        # Middle loop: Attitude control
         error_phi = phi_des - phi
         error_theta = theta_des - theta
         error_psi = psi_des - psi
@@ -170,6 +202,8 @@ class DualLoopPIDController:
         tau_theta = self.rate_kp_theta * error_q + self.rate_ki_theta * self.int_q + self.rate_kd_theta * d_error_q
         tau_psi = self.rate_kp_psi * error_r + self.rate_ki_psi * self.int_r + self.rate_kd_psi * d_error_r
 
-        u_f = self.mass * (self.g + az_des)
+        # Update the calculation of lift force to allow free fall when no control is set
+        u_f = self.mass * (-self.g + az_des) if az_des is not None else 0  # Allow free fall if no desired acceleration
+        print("u_f: ", u_f)
 
         return [u_f, tau_phi, tau_theta, tau_psi]

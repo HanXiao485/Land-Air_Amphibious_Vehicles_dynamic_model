@@ -7,6 +7,7 @@ import csv
 import tkinter as tk
 from tkinter import ttk
 from tkinter import messagebox
+from trajectory_planner import TrajectoryPlanner
 
 ########################################################################
 # PID Callback Handler Class
@@ -14,19 +15,24 @@ from tkinter import messagebox
 class PIDCallbackHandler:
     """
     Encapsulates the callback function for the simulation.
-    This class handles the operations to be performed at the end of each integration step,
-    including printing the current time and UAV state, updating PID controller parameters,
-    and returning the updated control inputs.
+    All callback operations (printing state, updating PID parameters, etc.)
+    are implemented in this class.
     """
-    def __init__(self, pid_controller):
+    def __init__(self, pid_controller, flight_mode="Fixed Point", trajectory_planner=None):
         self.pid_controller = pid_controller
         self.iteration_count = 0
+        self.flight_mode = flight_mode  # "Fixed Point" or "Curve Tracking"
+        self.trajectory_planner = trajectory_planner
 
     def callback(self, current_time, current_state, current_forces):
         self.iteration_count += 1
         # print("Iteration: {}, Time: {:.3f}, State: {}".format(self.iteration_count, current_time, current_state))
-        # Example: update PID parameters if needed (adjust outer loop Kp_x)
+        # Example: update PID parameter Kp_x dynamically if needed
         # self.pid_controller.Kp_x = 1.0 + 0.0001 * self.iteration_count
+        
+        # If in Curve Tracking mode, update desired position based on trajectory
+        if self.flight_mode == "Curve Tracking" and self.trajectory_planner is not None:
+            new_target = self.trajectory_planner.get_target_position(current_time)
+            self.pid_controller.desired_position = new_target
         new_forces = self.pid_controller.update(current_time, current_state)
-        print(self.pid_controller.Kp_z)
         return new_forces
