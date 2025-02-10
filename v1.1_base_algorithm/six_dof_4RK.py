@@ -5,6 +5,9 @@ from matplotlib.animation import FuncAnimation
 from mpl_toolkits.mplot3d.art3d import Line3D
 import configparser
 import csv
+import tkinter as tk
+from tkinter import ttk
+from tkinter import messagebox
 
 # Read configuration file
 config = configparser.ConfigParser()
@@ -96,6 +99,8 @@ class DualLoopPIDController:
         error_x = x_des - x
         error_y = y_des - y
         error_z = z_des - z
+        print("error_x: ", error_x)
+    
 
         self.int_x += error_x * dt
         self.int_y += error_y * dt
@@ -116,7 +121,7 @@ class DualLoopPIDController:
 
         # Compute computed desired attitude from position control using small-angle approximation
         phi_des_pos = (1.0 / self.g) * ay_des
-        theta_des_pos = - (1.0 / self.g) * ax_des
+        theta_des_pos = (1.0 / self.g) * ax_des
 
         # If desired attitude for roll and pitch is set to 0, use computed values for horizontal motion.
         # Otherwise, use the provided desired attitude.
@@ -135,6 +140,8 @@ class DualLoopPIDController:
         error_phi = phi_des - phi
         error_theta = theta_des - theta
         error_psi = psi_des - psi
+        
+        print("Error theta: ", error_theta)
 
         self.int_phi_att += error_phi * dt
         self.int_theta_att += error_theta * dt
@@ -193,7 +200,7 @@ def pid_callback(current_time, current_state, current_forces):
     """
     global pid_controller, iteration_count
     iteration_count += 1
-    print("Iteration: {}, Time: {:.3f}, State: {}".format(iteration_count, current_time, current_state))
+    # print("Iteration: {}, Time: {:.3f}, State: {}".format(iteration_count, current_time, current_state))
     
     # Example: update PID parameters if needed (e.g., adjust position control Kp_x)
     pid_controller.Kp_x = 1.0 + 0.0001 * iteration_count
@@ -570,6 +577,7 @@ def main():
 
     drone.plot_results()
     drone.animate_trajectory()
+
 
 if __name__ == "__main__":
     main()
