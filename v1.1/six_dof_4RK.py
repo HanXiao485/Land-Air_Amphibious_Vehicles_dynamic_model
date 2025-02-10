@@ -6,69 +6,81 @@ from mpl_toolkits.mplot3d.art3d import Line3D
 import configparser
 import csv
 
-# 读取配置文件
+# Read configuration file
 config = configparser.ConfigParser()
 config.read('E:\\Land-Air_Amphibious_Vehicles_dynamic_model\\v1.1\\config.ini')
 
 ########################################################################
-# 双环 PID 控制器类（参数化）
+# PID Controller Class with Three Loops (Position, Attitude, Rate)
 ########################################################################
 class DualLoopPIDController:
     """
-    双环 PID 控制器类，用于实现无人机的位置环和姿态环控制。
-
-    外环（位置环）：根据当前位置与目标位置的误差，输出期望加速度，
-      并利用小角度近似计算出期望的滚转角和俯仰角。
-
-    内环（姿态环）：根据实际与期望的欧拉角误差，输出控制力矩。
+    Three-loop PID controller:
+    - Outer loop (Position control): calculates desired acceleration based on position error,
+      and then computes the desired roll and pitch angles using small-angle approximation.
+    - Middle loop (Attitude control): calculates desired angular rates based on attitude error
+      using full PID control (with proportional, integral and derivative terms).
+    - Inner loop (Rate control): calculates control moments using PID control on angular rate error.
     
-    总升力由垂直方向 PID 输出计算得到：
-      u_f = mass * (g + az_des)
+    The total lift force is computed from the vertical acceleration:
+         u_f = mass * (g + a_z_des)
     """
-    def __init__(self, mass, gravity, desired_position, desired_yaw, dt,
+    def __init__(self, mass, gravity, desired_position, desired_attitude, dt,
+                 # Outer loop PID parameters (Position control)
                  kp_x=1.0, ki_x=0.0, kd_x=0.5,
                  kp_y=1.0, ki_y=0.0, kd_y=0.5,
                  kp_z=2.0, ki_z=0.0, kd_z=1.0,
-                 kp_phi=5.0, ki_phi=0.0, kd_phi=2.0,
-                 kp_theta=5.0, ki_theta=0.0, kd_theta=2.0,
-                 kp_psi=1.0, ki_psi=0.0, kd_psi=0.2):
+                 # Middle loop PID parameters (Attitude control)
+                 att_kp_phi=5.0, att_ki_phi=0.1, att_kd_phi=2.0,
+                 att_kp_theta=5.0, att_ki_theta=0.1, att_kd_theta=2.0,
+                 att_kp_psi=1.0, att_ki_psi=0.0, att_kd_psi=0.2,
+                 # Inner loop PID parameters (Angular rate control)
+                 rate_kp_phi=2.0, rate_ki_phi=0.0, rate_kd_phi=0.5,
+                 rate_kp_theta=2.0, rate_ki_theta=0.0, rate_kd_theta=0.5,
+                 rate_kp_psi=1.0, rate_ki_psi=0.0, rate_kd_psi=0.2):
         self.mass = mass
         self.g = gravity
-        self.desired_position = desired_position  # (x_des, y_des, z_des)
-        self.desired_yaw = desired_yaw
+        self.desired_position = desired_position      # Target position: (x_des, y_des, z_des)
+        self.desired_attitude = desired_attitude      # Target attitude: (phi_des, theta_des, psi_des)
         self.dt = dt
-        
-        # 外环 PID 参数
+
+        # Outer loop PID parameters (Position control)
         self.Kp_x = kp_x; self.Ki_x = ki_x; self.Kd_x = kd_x
         self.Kp_y = kp_y; self.Ki_y = ki_y; self.Kd_y = kd_y
         self.Kp_z = kp_z; self.Ki_z = ki_z; self.Kd_z = kd_z
-        
-        # 内环 PID 参数
-        self.Kp_phi = kp_phi; self.Ki_phi = ki_phi; self.Kd_phi = kd_phi
-        self.Kp_theta = kp_theta; self.Ki_theta = ki_theta; self.Kd_theta = kd_theta
-        self.Kp_psi = kp_psi; self.Ki_psi = ki_psi; self.Kd_psi = kd_psi
-        
-        # 外环积分项和前一时刻误差
+
+        # Middle loop PID parameters (Attitude control)
+        self.att_kp_phi = att_kp_phi; self.att_ki_phi = att_ki_phi; self.att_kd_phi = att_kd_phi
+        self.att_kp_theta = att_kp_theta; self.att_ki_theta = att_ki_theta; self.att_kd_theta = att_kd_theta
+        self.att_kp_psi = att_kp_psi; self.att_ki_psi = att_ki_psi; self.att_kd_psi = att_kd_psi
+
+        # Initialize middle loop integration and last error (Attitude control)
+        self.int_phi_att = 0.0; self.last_error_phi_att = 0.0
+        self.int_theta_att = 0.0; self.last_error_theta_att = 0.0
+        self.int_psi_att = 0.0; self.last_error_psi_att = 0.0
+
+        # Inner loop PID parameters (Angular rate control)
+        self.rate_kp_phi = rate_kp_phi; self.rate_ki_phi = rate_ki_phi; self.rate_kd_phi = rate_kd_phi
+        self.rate_kp_theta = rate_kp_theta; self.rate_ki_theta = rate_ki_theta; self.rate_kd_theta = rate_kd_theta
+        self.rate_kp_psi = rate_kp_psi; self.rate_ki_psi = rate_ki_psi; self.rate_kd_psi = rate_kd_psi
+
+        # Initialize outer loop integration and last error (Position control)
         self.int_x = 0.0; self.last_error_x = 0.0
         self.int_y = 0.0; self.last_error_y = 0.0
         self.int_z = 0.0; self.last_error_z = 0.0
-        # 内环积分项和前一时刻误差
-        self.int_phi = 0.0; self.last_error_phi = 0.0
-        self.int_theta = 0.0; self.last_error_theta = 0.0
-        self.int_psi = 0.0; self.last_error_psi = 0.0
-        
+
+        # Initialize inner loop integration and last error (Angular rate control)
+        self.int_p = 0.0; self.last_error_p = 0.0
+        self.int_q = 0.0; self.last_error_q = 0.0
+        self.int_r = 0.0; self.last_error_r = 0.0
+
         self.last_time = None
-        
+
     def update(self, current_time, state):
         """
-        根据当前时间和状态计算新的控制输入。
-
-        参数:
-          current_time: 当前时间
-          state: 状态向量 [x, y, z, dx, dy, dz, phi, theta, psi, p, q, r]
-
-        返回:
-          forces: 新的控制输入 [lift_force, tau_phi, tau_theta, tau_psi]
+        Compute new control input based on current time and state.
+        State: [x, y, z, dx, dy, dz, phi, theta, psi, p, q, r]
+        Output: Control inputs: [lift_force, tau_phi, tau_theta, tau_psi]
         """
         if self.last_time is None:
             dt = self.dt
@@ -76,11 +88,11 @@ class DualLoopPIDController:
             dt = current_time - self.last_time
         self.last_time = current_time
 
-        # 提取状态
+        # Extract state variables
         x, y, z, dx, dy, dz, phi, theta, psi, p, q, r = state
         x_des, y_des, z_des = self.desired_position
 
-        # 外环：位置误差
+        # Outer loop: Position control
         error_x = x_des - x
         error_y = y_des - y
         error_z = z_des - z
@@ -97,93 +109,105 @@ class DualLoopPIDController:
         self.last_error_y = error_y
         self.last_error_z = error_z
 
-        # 外环 PID 输出期望加速度（m/s²）
+        # Compute desired acceleration
         ax_des = self.Kp_x * error_x + self.Ki_x * self.int_x + self.Kd_x * d_error_x
         ay_des = self.Kp_y * error_y + self.Ki_y * self.int_y + self.Kd_y * d_error_y
         az_des = self.Kp_z * error_z + self.Ki_z * self.int_z + self.Kd_z * d_error_z
 
-        # 利用小角度近似计算期望欧拉角
-        phi_des = (1.0 / self.g) * ay_des
-        theta_des = - (1.0 / self.g) * ax_des
-        psi_des = self.desired_yaw
+        # Compute computed desired attitude from position control using small-angle approximation
+        phi_des_pos = (1.0 / self.g) * ay_des
+        theta_des_pos = - (1.0 / self.g) * ax_des
 
-        # 内环：姿态误差
+        # If desired attitude for roll and pitch is set to 0, use computed values for horizontal motion.
+        # Otherwise, use the provided desired attitude.
+        if self.desired_attitude[0] == 0:
+            phi_des = phi_des_pos
+        else:
+            phi_des = self.desired_attitude[0]
+        if self.desired_attitude[1] == 0:
+            theta_des = theta_des_pos
+        else:
+            theta_des = self.desired_attitude[1]
+        # Yaw is always taken from desired attitude.
+        psi_des = self.desired_attitude[2]
+
+        # Middle loop: Attitude control (calculate desired angular rates with full PID)
         error_phi = phi_des - phi
         error_theta = theta_des - theta
         error_psi = psi_des - psi
 
-        self.int_phi += error_phi * dt
-        self.int_theta += error_theta * dt
-        self.int_psi += error_psi * dt
+        self.int_phi_att += error_phi * dt
+        self.int_theta_att += error_theta * dt
+        self.int_psi_att += error_psi * dt
 
-        d_error_phi = (error_phi - self.last_error_phi) / dt
-        d_error_theta = (error_theta - self.last_error_theta) / dt
-        d_error_psi = (error_psi - self.last_error_psi) / dt
+        d_error_phi_att = (error_phi - self.last_error_phi_att) / dt
+        d_error_theta_att = (error_theta - self.last_error_theta_att) / dt
+        d_error_psi_att = (error_psi - self.last_error_psi_att) / dt
 
-        self.last_error_phi = error_phi
-        self.last_error_theta = error_theta
-        self.last_error_psi = error_psi
+        self.last_error_phi_att = error_phi
+        self.last_error_theta_att = error_theta
+        self.last_error_psi_att = error_psi
 
-        # 内环 PID 输出控制力矩
-        tau_phi = self.Kp_phi * error_phi + self.Ki_phi * self.int_phi + self.Kd_phi * d_error_phi
-        tau_theta = self.Kp_theta * error_theta + self.Ki_theta * self.int_theta + self.Kd_theta * d_error_theta
-        tau_psi = self.Kp_psi * error_psi + self.Ki_psi * self.int_psi + self.Kd_psi * d_error_psi
+        p_des = self.att_kp_phi * error_phi + self.att_ki_phi * self.int_phi_att + self.att_kd_phi * d_error_phi_att
+        q_des = self.att_kp_theta * error_theta + self.att_ki_theta * self.int_theta_att + self.att_kd_theta * d_error_theta_att
+        r_des = self.att_kp_psi * error_psi + self.att_ki_psi * self.int_psi_att + self.att_kd_psi * d_error_psi_att
 
-        # 总升力计算
+        # Inner loop: Rate control
+        error_p = p_des - p
+        error_q = q_des - q
+        error_r = r_des - r
+
+        self.int_p += error_p * dt
+        self.int_q += error_q * dt
+        self.int_r += error_r * dt
+
+        d_error_p = (error_p - self.last_error_p) / dt
+        d_error_q = (error_q - self.last_error_q) / dt
+        d_error_r = (error_r - self.last_error_r) / dt
+
+        self.last_error_p = error_p
+        self.last_error_q = error_q
+        self.last_error_r = error_r
+
+        tau_phi = self.rate_kp_phi * error_p + self.rate_ki_phi * self.int_p + self.rate_kd_phi * d_error_p
+        tau_theta = self.rate_kp_theta * error_q + self.rate_ki_theta * self.int_q + self.rate_kd_theta * d_error_q
+        tau_psi = self.rate_kp_psi * error_r + self.rate_ki_psi * self.int_r + self.rate_kd_psi * d_error_r
+
+        # Compute total lift force
         u_f = self.mass * (self.g + az_des)
 
         return [u_f, tau_phi, tau_theta, tau_psi]
 
 ########################################################################
-# 全局 PID 控制器实例（在主函数中初始化并赋值）
+# Global PID Controller instance (to be initialized in main)
 ########################################################################
 pid_controller = None
-# 用于记录迭代次数
 iteration_count = 0
 
 def pid_callback(current_time, current_state, current_forces):
     """
-    回调函数，在每个迭代步骤结束后调用：
-      1. 打印当前时间和无人机状态参数；
-      2. 根据需要重新给 PID 控制器参数赋值；
-      3. 返回更新后的控制输入。
+    Callback function called after each integration step:
+      1. Print current time and UAV state.
+      2. Update PID parameters if needed.
+      3. Return updated control input.
     """
     global pid_controller, iteration_count
     iteration_count += 1
-    # 打印当前时间和状态参数（状态向量包含 [x, y, z, dx, dy, dz, phi, theta, psi, p, q, r]）
-    print("迭代次数: {}, 时间: {:.3f}, 状态: {}".format(iteration_count, current_time, current_state))
+    print("Iteration: {}, Time: {:.3f}, State: {}".format(iteration_count, current_time, current_state))
     
-    # 在每一次迭代中重新赋值 PID 参数（示例：随迭代次数微调某些参数）
-    # 例如，每次迭代使位置环的 Kp_x 略微增大，用户可以根据实际需要修改
-    # pid_controller.Kp_x = 1.0 + 0.00001 * iteration_count
-    # pid_controller.Ki_x = 1.0 + 0.00001 * iteration_count
-    # pid_controller.Kd_x = 1.0 + 0.00001 * iteration_count
-    # pid_controller.Kp_y = 1.0 + 0.00001 * iteration_count
-    # pid_controller.Ki_y = 1.0 + 0.00001 * iteration_count
-    # pid_controller.Kd_y = 1.0 + 0.00001 * iteration_count
-    # pid_controller.Kp_z = 1.0 + 0.00001 * iteration_count
-    # pid_controller.Ki_z = 1.0 + 0.00001 * iteration_count
-    # pid_controller.Kd_z = 1.0 + 0.00001 * iteration_count
-    # pid_controller.Kp_phi = 1.0 + 0.00001 * iteration_count
-    # pid_controller.Ki_phi = 1.0 + 0.00001 * iteration_count
-    # pid_controller.Kd_phi = 1.0 + 0.00001 * iteration_count
-    # pid_controller.Kp_theta = 1.0 + 0.00001 * iteration_count
-    # pid_controller.Ki_theta = 1.0 + 0.00001 * iteration_count
-    # pid_controller.Kd_theta = 1.0 + 0.00001 * iteration_count
-    # pid_controller.Kp_psi = 1.0 + 0.00001 * iteration_count
-    # pid_controller.Ki_psi = 1.0 + 0.00001 * iteration_count
-    # pid_controller.Kd_psi = 1.0 + 0.00001 * iteration_count
-    # 这里可以根据需要对其他参数也进行更新
-
+    # Example: update PID parameters if needed (e.g., adjust position control Kp_x)
+    pid_controller.Kp_x = 1.0 + 0.0001 * iteration_count
+    
     new_forces = pid_controller.update(current_time, current_state)
     return new_forces
 
 ########################################################################
-# 四阶龙格-库塔积分器类（增加回调接口）
+# RK4 Integrator Class (with callback)
 ########################################################################
 class RK4Integrator:
     """
-    四阶龙格-库塔法单步积分器，在每个时间步积分后调用回调函数更新控制输入。
+    Fourth-order Runge-Kutta integrator.
+    After each integration step, calls a callback function to update the control input.
     """
     def __init__(self, func, forces):
         self.func = func
@@ -202,7 +226,7 @@ class RK4Integrator:
             k3 = np.array(self.func(t_current + dt/2, state + dt/2 * k2, self.forces))
             k4 = np.array(self.func(t_current + dt, state + dt * k3, self.forces))
             new_state = state + (dt/6) * (k1 + 2*k2 + 2*k3 + k4)
-            # 防止无人机穿透地面：若 z < 0，则夹紧 z 和 dz 为 0
+            # Prevent UAV from penetrating the ground: if z < 0, set z and dz to 0
             if new_state[2] < 0:
                 new_state[2] = 0
                 new_state[5] = 0
@@ -215,11 +239,11 @@ class RK4Integrator:
         return time_eval, np.array(self.states)
 
 ########################################################################
-# CSV 导出类
+# CSV Exporter Class
 ########################################################################
 class CSVExporter:
     """
-    将每个时间步的状态及控制输入写入 CSV 文件
+    Exports the UAV state and control inputs at each time step to a CSV file.
     """
     def __init__(self, filename, headers=None):
         if headers is None:
@@ -258,7 +282,7 @@ class CSVExporter:
                 writer.writerow(row)
 
 ########################################################################
-# 无人机仿真类
+# UAV Simulation Class
 ########################################################################
 class DroneSimulation:
     def __init__(self, mass, inertia, drag_coeffs, gravity):
@@ -270,9 +294,9 @@ class DroneSimulation:
 
     def rigid_body_dynamics(self, t, state, forces):
         """
-        无人机六自由度动力学微分方程
-        状态: [x, y, z, dx, dy, dz, phi, theta, psi, p, q, r]
-        控制输入: [lift_force, tau_phi, tau_theta, tau_psi]
+        UAV rigid-body dynamics.
+        State: [x, y, z, dx, dy, dz, phi, theta, psi, p, q, r]
+        Control input: [lift_force, tau_phi, tau_theta, tau_psi]
         """
         x, y, z, dx, dy, dz, phi, theta, psi, p, q, r = state
         u_f, tau_phi, tau_theta, tau_psi = forces
@@ -303,9 +327,10 @@ class DroneSimulation:
         integrator = RK4Integrator(self.rigid_body_dynamics, forces)
         times, states = integrator.integrate(time_eval, initial_state, callback)
         self.solution = type('Solution', (), {})()
-        self.solution.y = states.T  # 转置后，每行代表一个状态变量
+        self.solution.y = states.T
         self.time_eval = times
-        self.solution.y[6], self.solution.y[7], self.solution.y[8] = self.normalize_euler_angles(self.solution.y[6], self.solution.y[7], self.solution.y[8])
+        self.solution.y[6], self.solution.y[7], self.solution.y[8] = \
+            self.normalize_euler_angles(self.solution.y[6], self.solution.y[7], self.solution.y[8])
 
     def data_results(self):
         solution = self.solution
@@ -326,25 +351,25 @@ class DroneSimulation:
         axs[0].plot(self.time_eval, x, label='x')
         axs[0].plot(self.time_eval, y, label='y')
         axs[0].plot(self.time_eval, z, label='z')
-        axs[0].set_title('Position over time')
+        axs[0].set_title('Position over Time')
         axs[0].legend()
 
         axs[1].plot(self.time_eval, dx, label='dx')
         axs[1].plot(self.time_eval, dy, label='dy')
         axs[1].plot(self.time_eval, dz, label='dz')
-        axs[1].set_title('Velocity over time')
+        axs[1].set_title('Velocity over Time')
         axs[1].legend()
 
         axs[2].plot(self.time_eval, phi, label='phi')
         axs[2].plot(self.time_eval, theta, label='theta')
         axs[2].plot(self.time_eval, psi, label='psi')
-        axs[2].set_title('Euler angles over time')
+        axs[2].set_title('Euler Angles over Time')
         axs[2].legend()
 
         axs[3].plot(self.time_eval, p, label='p (Roll rate)')
         axs[3].plot(self.time_eval, q, label='q (Pitch rate)')
         axs[3].plot(self.time_eval, r, label='r (Yaw rate)')
-        axs[3].set_title('Euler angles velocity over time')
+        axs[3].set_title('Angular Rates over Time')
         axs[3].legend()
 
         plt.tight_layout()
@@ -363,7 +388,7 @@ class DroneSimulation:
         ax.set_xlabel('X')
         ax.set_ylabel('Y')
         ax.set_zlabel('Z')
-        ax.set_title("Drone Trajectory Visualization")
+        ax.set_title("UAV Trajectory Visualization")
 
         trajectory_line, = ax.plot([], [], [], 'b-', label="Trajectory")
         real_time_axes = []
@@ -427,10 +452,10 @@ class DroneSimulation:
         plt.show()
 
 ########################################################################
-# 主函数
+# Main Function
 ########################################################################
 def main():
-    # 从配置文件中读取无人机及仿真参数
+    # Read UAV and simulation parameters from config file
     mass = config.getfloat('DroneSimulation', 'mass')
     inertia = (
         config.getfloat('DroneSimulation', 'inertia_x'),
@@ -443,7 +468,7 @@ def main():
     )
     gravity = config.getfloat('DroneSimulation', 'gravity')
 
-    # 从 [Simulation] 读取初始状态参数
+    # Read initial state from [Simulation]
     initial_state = [
         config.getfloat('Simulation', 'initial_state_x'),
         config.getfloat('Simulation', 'initial_state_y'),
@@ -459,16 +484,53 @@ def main():
         config.getfloat('Simulation', 'initial_state_r')
     ]
 
-    # 从 [Simulation] 读取目标位置参数
+    # Read target position from [Simulation]
     target_position = (
         config.getfloat('Simulation', 'target_position_x'),
         config.getfloat('Simulation', 'target_position_y'),
         config.getfloat('Simulation', 'target_position_z')
     )
 
-    # 用户可在此处直接赋值覆盖配置文件的参数（示例）
-    # initial_state[0] = 1.0  # 修改初始 x 坐标
-    # target_position = (0.0, 0.0, 10.0)  # 修改目标位置
+    # Read PID parameters from [PIDController], including target attitude
+    pid_params = {
+        'kp_x': config.getfloat('PIDController', 'kp_x'),
+        'ki_x': config.getfloat('PIDController', 'ki_x'),
+        'kd_x': config.getfloat('PIDController', 'kd_x'),
+        'kp_y': config.getfloat('PIDController', 'kp_y'),
+        'ki_y': config.getfloat('PIDController', 'ki_y'),
+        'kd_y': config.getfloat('PIDController', 'kd_y'),
+        'kp_z': config.getfloat('PIDController', 'kp_z'),
+        'ki_z': config.getfloat('PIDController', 'ki_z'),
+        'kd_z': config.getfloat('PIDController', 'kd_z'),
+        'att_kp_phi': config.getfloat('PIDController', 'att_kp_phi'),
+        'att_ki_phi': config.getfloat('PIDController', 'att_ki_phi'),
+        'att_kd_phi': config.getfloat('PIDController', 'att_kd_phi'),
+        'att_kp_theta': config.getfloat('PIDController', 'att_kp_theta'),
+        'att_ki_theta': config.getfloat('PIDController', 'att_ki_theta'),
+        'att_kd_theta': config.getfloat('PIDController', 'att_kd_theta'),
+        'att_kp_psi': config.getfloat('PIDController', 'att_kp_psi'),
+        'att_ki_psi': config.getfloat('PIDController', 'att_ki_psi'),
+        'att_kd_psi': config.getfloat('PIDController', 'att_kd_psi'),
+        'rate_kp_phi': config.getfloat('PIDController', 'rate_kp_phi'),
+        'rate_ki_phi': config.getfloat('PIDController', 'rate_ki_phi'),
+        'rate_kd_phi': config.getfloat('PIDController', 'rate_kd_phi'),
+        'rate_kp_theta': config.getfloat('PIDController', 'rate_kp_theta'),
+        'rate_ki_theta': config.getfloat('PIDController', 'rate_ki_theta'),
+        'rate_kd_theta': config.getfloat('PIDController', 'rate_kd_theta'),
+        'rate_kp_psi': config.getfloat('PIDController', 'rate_kp_psi'),
+        'rate_ki_psi': config.getfloat('PIDController', 'rate_ki_psi'),
+        'rate_kd_psi': config.getfloat('PIDController', 'rate_kd_psi'),
+        'pid_dt': config.getfloat('PIDController', 'pid_dt'),
+        # Target attitude; if not set (None or 0 for phi/theta), the computed value from position control is used.
+        'desired_phi': config.getfloat('PIDController', 'desired_phi') if config.has_option('PIDController', 'desired_phi') else None,
+        'desired_theta': config.getfloat('PIDController', 'desired_theta') if config.has_option('PIDController', 'desired_theta') else None,
+        'desired_psi': config.getfloat('PIDController', 'desired_psi')
+    }
+
+    # Users can override parameters here (example):
+    # initial_state[0] = 1.0
+    # target_position = (0.0, 0.0, 10.0)
+    # pid_params['kp_x'] = 2.0
 
     forces = [
         config.getfloat('Simulation', 'forces_u_f'),
@@ -483,57 +545,30 @@ def main():
     )
     time_eval = np.linspace(time_span[0], time_span[1], config.getint('Simulation', 'time_eval_points'))
 
-    # 从 [PIDController] 读取 PID 参数
-    pid_params = {
-        'kp_x': config.getfloat('PIDController', 'kp_x'),
-        'ki_x': config.getfloat('PIDController', 'ki_x'),
-        'kd_x': config.getfloat('PIDController', 'kd_x'),
-        'kp_y': config.getfloat('PIDController', 'kp_y'),
-        'ki_y': config.getfloat('PIDController', 'ki_y'),
-        'kd_y': config.getfloat('PIDController', 'kd_y'),
-        'kp_z': config.getfloat('PIDController', 'kp_z'),
-        'ki_z': config.getfloat('PIDController', 'ki_z'),
-        'kd_z': config.getfloat('PIDController', 'kd_z'),
-        'kp_phi': config.getfloat('PIDController', 'kp_phi'),
-        'ki_phi': config.getfloat('PIDController', 'ki_phi'),
-        'kd_phi': config.getfloat('PIDController', 'kd_phi'),
-        'kp_theta': config.getfloat('PIDController', 'kp_theta'),
-        'ki_theta': config.getfloat('PIDController', 'ki_theta'),
-        'kd_theta': config.getfloat('PIDController', 'kd_theta'),
-        'kp_psi': config.getfloat('PIDController', 'kp_psi'),
-        'ki_psi': config.getfloat('PIDController', 'ki_psi'),
-        'kd_psi': config.getfloat('PIDController', 'kd_psi'),
-        'pid_dt': config.getfloat('PIDController', 'pid_dt'),
-        'desired_yaw': config.getfloat('PIDController', 'desired_yaw')
-    }
-
-    # 用户可在此处直接修改 PID 参数（示例）
-    # pid_params['kp_x'] = 2.0
-
-    # 在主函数中创建全局 PID 控制器实例
-    global pid_controller
+    global pid_controller, iteration_count
+    iteration_count = 0
     pid_controller = DualLoopPIDController(
-        mass, gravity, target_position, pid_params['desired_yaw'], pid_params['pid_dt'],
+        mass, gravity, target_position,
+        desired_attitude=(pid_params['desired_phi'], pid_params['desired_theta'], pid_params['desired_psi']),
+        dt=pid_params['pid_dt'],
         kp_x=pid_params['kp_x'], ki_x=pid_params['ki_x'], kd_x=pid_params['kd_x'],
         kp_y=pid_params['kp_y'], ki_y=pid_params['ki_y'], kd_y=pid_params['kd_y'],
         kp_z=pid_params['kp_z'], ki_z=pid_params['ki_z'], kd_z=pid_params['kd_z'],
-        kp_phi=pid_params['kp_phi'], ki_phi=pid_params['ki_phi'], kd_phi=pid_params['kd_phi'],
-        kp_theta=pid_params['kp_theta'], ki_theta=pid_params['ki_theta'], kd_theta=pid_params['kd_theta'],
-        kp_psi=pid_params['kp_psi'], ki_psi=pid_params['ki_psi'], kd_psi=pid_params['kd_psi']
+        att_kp_phi=pid_params['att_kp_phi'], att_ki_phi=pid_params['att_ki_phi'], att_kd_phi=pid_params['att_kd_phi'],
+        att_kp_theta=pid_params['att_kp_theta'], att_ki_theta=pid_params['att_ki_theta'], att_kd_theta=pid_params['att_kd_theta'],
+        att_kp_psi=pid_params['att_kp_psi'], att_ki_psi=pid_params['att_ki_psi'], att_kd_psi=pid_params['att_kd_psi'],
+        rate_kp_phi=pid_params['rate_kp_phi'], rate_ki_phi=pid_params['rate_ki_phi'], rate_kd_phi=pid_params['rate_kd_phi'],
+        rate_kp_theta=pid_params['rate_kp_theta'], rate_ki_theta=pid_params['rate_ki_theta'], rate_kd_theta=pid_params['rate_kd_theta'],
+        rate_kp_psi=pid_params['rate_kp_psi'], rate_ki_psi=pid_params['rate_ki_psi'], rate_kd_psi=pid_params['rate_kd_psi']
     )
 
-    # 初始化无人机仿真对象，并传入 pid_callback
     drone = DroneSimulation(mass, inertia, drag_coeffs, gravity)
     drone.simulate(initial_state, forces, time_span, time_eval, callback=pid_callback)
 
-    # 导出数据到 CSV 文件
     csv_exporter = CSVExporter("simulation_results.csv")
     csv_exporter.export(time_eval, drone.solution.y, forces)
 
-    # 绘制状态曲线
     drone.plot_results()
-
-    # 显示 3D 轨迹动画
     drone.animate_trajectory()
 
 if __name__ == "__main__":
