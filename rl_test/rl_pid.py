@@ -6,189 +6,122 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.env_checker import check_env
 import matplotlib.pyplot as plt
 
-class DoubleCascadePIDEnv(gym.Env):
-    """
-    双环串级PID控制环境
-    外环：位置控制
-    内环：速度控制
-    """
-    def __init__(self):
-        super(DoubleCascadePIDEnv, self).__init__()
-        
-        # 系统参数
-        self.dt = 0.01  # 仿真时间步长
-        self.max_steps = 200  # 最大步数
-        self.target = 10.0  # 目标位置
-        self.velocity_target = 0  # 初始化 velocity_target 为 0 
-        
-        # 动作空间：6个PID参数 [外环Kp, Ki, Kd, 内环Kp, Ki, Kd]
+from drone_simulation import DroneSimulation
+from dual_loop_pid import DualLoopPIDController
+from RK4Integrator import RK4Integrator
+from call_back import PIDCallbackHandler
+
+
+class QuadrotorEnv(gym.Env):
+    def __init__(self, mass, inertia, drag_coeffs, gravity, pid_controller):
+        super(QuadrotorEnv, self).__init__()
+
+        # 动作空间：升力u_f，三个力矩tau_phi, tau_theta, tau_psi
         self.action_space = spaces.Box(
-            low=np.array([0, 0, 0, 0, 0, 0], dtype=np.float32),
-            high=np.array([2, 2, 2, 2, 2, 2], dtype=np.float32),
+            low=np.array([0.0, -10.0, -10.0, -10.0]),
+            high=np.array([10.0, 10.0, 10.0, 10.0]),
             dtype=np.float32
         )
-        
-        # 状态空间：外环误差，外环积分，外环微分，内环误差，内环积分，内环微分
+
+        # 观测空间：位置（x, y, z），速度（dx, dy, dz），姿态角（phi, theta, psi），角速度（p, q, r）
         self.observation_space = spaces.Box(
-            low=-np.inf,
-            high=np.inf,
-            shape=(6,),
+            low=np.array([-np.inf, -np.inf, 0, -np.inf, -np.inf, -np.inf, -np.pi, -np.pi, -np.pi, -np.inf, -np.inf, -np.inf], dtype=np.float32),
+            high=np.array([np.inf, np.inf, 10, np.inf, np.inf, np.inf, np.pi, np.pi, np.pi, np.inf, np.inf, np.inf], dtype=np.float32),
             dtype=np.float32
         )
-        
-        # 系统模型参数（二阶系统示例）
-        self.mass = 1.0     # 质量
-        self.damping = 0.1  # 阻尼
-        
-        # 重置环境
-        self.reset()
 
-    def reset(self, seed=None, options=None):
-        super().reset(seed=seed)  # 确保 Gym 兼容性
-        # 初始状态
-        self.position = 0.0  # 位置
-        self.velocity = 0.0  # 速度
+        # 初始化PID控制器和四旋翼动力学模型
+        self.pid_controller = pid_controller
+        self.drone_sim = DroneSimulation(mass, inertia, drag_coeffs, gravity)
+
+        # 初始状态（例如：初始为静止状态）
+        self.state = np.zeros(12)
+        self.done = False
+        
+        # 初始化计数器
         self.step_count = 0
-        
-        # 外环PID记忆
-        self.outer_integral = 0.0
-        self.outer_last_error = 0.0
-        
-        # 内环PID记忆
-        self.inner_integral = 0.0
-        self.inner_last_error = 0.0
-        
-        obs = self._get_obs()
-        info = {}  # 额外的环境信息，Gym 需要返回
-        
-        return obs, info  # 这里必须返回元组
 
-    def _get_obs(self):
-        """获取观测值"""
-        outer_error = self.target - self.position
-        inner_error = self.velocity_target - self.velocity
-        return np.array([ 
-            outer_error,
-            self.outer_integral,
-            outer_error - self.outer_last_error,
-            inner_error,
-            self.inner_integral,
-            inner_error - self.inner_last_error
-        ], dtype=np.float32)
+    def reset(self):
+        """重置环境状态"""
+        self.state = np.zeros(12)  # 初始状态为零
+        self.done = False
+        return self.state
 
     def step(self, action):
-        # 解析动作参数
-        outer_kp, outer_ki, outer_kd, inner_kp, inner_ki, inner_kd = action
-        
-        # 外环PID控制（位置环）
-        outer_error = self.target - self.position
-        self.outer_integral += outer_error * self.dt
-        outer_derivative = (outer_error - self.outer_last_error) / self.dt
-        
-        # 外环输出作为内环目标速度
-        self.velocity_target = (
-            outer_kp * outer_error +
-            outer_ki * self.outer_integral +
-            outer_kd * outer_derivative
+        """根据动作更新环境状态"""
+        # 使用PID控制器根据当前状态计算控制输入
+
+        u_f, tau_phi, tau_theta, tau_psi = self.pid_controller.update(
+            current_time=self.step_count, state=self.state
         )
-        
-        # 内环PID控制（速度环）
-        inner_error = self.velocity_target - self.velocity
-        self.inner_integral += inner_error * self.dt
-        inner_derivative = (inner_error - self.inner_last_error) / self.dt
-        
-        # 计算控制力
-        force = (
-            inner_kp * inner_error +
-            inner_ki * self.inner_integral +
-            inner_kd * inner_derivative
-        )
-        
-        # 系统动力学模型
-        acceleration = (force - self.damping * self.velocity) / self.mass
-        self.velocity += acceleration * self.dt
-        self.position += self.velocity * self.dt
-        
-        # 保存误差用于微分计算
-        self.outer_last_error = outer_error
-        self.inner_last_error = inner_error
-        
-        # 计算奖励
-        reward = -(
-            0.5 * abs(outer_error) +  # 位置误差
-            0.3 * abs(inner_error) +  # 速度误差
-            0.1 * abs(force)          # 控制量约束
-        )
-        
-        reward = float(reward)
-        
-        # 终止条件
+
+        # 将PID控制器生成的控制输入传递给四旋翼动力学模型
+        forces = [u_f, tau_phi, tau_theta, tau_psi]
+        t = self.step_count  # 当前时间步
+        state = self.state
+
+        # 使用RK4积分器计算状态更新
+        callback_handler = PIDCallbackHandler(pid_controller)
+        integrator = RK4Integrator(self.drone_sim.rigid_body_dynamics, forces)
+        time_eval = np.linspace(0, 0.1, 10)  # 仿真时间步长
+        self.drone_sim.simulate(state, forces, time_span=(0, 10), time_eval=time_eval, callback=callback_handler.callback)
+
+        # 获取新的状态
+        self.state = self.drone_sim.data_results()
+
+        # 判断任务是否完成
+        terminated = np.linalg.norm(self.state[0:3]) > 10  # 假设任务完成时超出10米
         self.step_count += 1
-        done = self.step_count >= self.max_steps  # 终止
-        truncated = False  # Gym API 需要返回 `truncated`，在此设为 False
-        
-        return self._get_obs(), reward, done, truncated, {}
 
-# 创建环境
-env = DoubleCascadePIDEnv()
-check_env(env)  # 检查环境兼容性
+        # 奖励函数：简单的惩罚当前位置越远
+        reward = -np.linalg.norm(self.state[0:3])
 
-# 创建PPO模型
-model = PPO(
-    "MlpPolicy",
-    env,
-    verbose=1,
-    learning_rate=3e-4,
-    n_steps=1024,
-    batch_size=64,
-    n_epochs=10,
-    gamma=0.99,
-    gae_lambda=0.95,
-    clip_range=0.2,
-    device="cuda" if torch.cuda.is_available() else "cpu"
-)
+        return self.state, reward, terminated, False, {}
 
-# 训练模型并记录奖励和损失
-reward_list = []  # 存储奖励
-loss_list = []    # 存储损失
-callback = model.learn(total_timesteps=100000)
+    def render(self):
+        """渲染环境状态"""
+        print(f"Step: {self.step_count}, State: {self.state}")
 
-# 绘制奖励和损失曲线
-def plot_reward_loss(reward_list, loss_list):
-    plt.figure(figsize=(12, 6))
-    
-    # 绘制奖励曲线
-    plt.subplot(1, 2, 1)
-    plt.plot(reward_list, label="Reward")
-    plt.title("Reward Curve")
-    plt.xlabel("Timesteps")
-    plt.ylabel("Reward")
-    plt.legend()
-    
-    # 绘制损失曲线
-    plt.subplot(1, 2, 2)
-    plt.plot(loss_list, label="Loss", color="red")
-    plt.title("Loss Curve")
-    plt.xlabel("Timesteps")
-    plt.ylabel("Loss")
-    plt.legend()
-    
-    plt.tight_layout()
-    plt.show()
+    def close(self):
+        """关闭环境"""
+        pass
 
-# 保存模型
-model.save("dual_pid_ppo")
+# 使用PID控制器与四旋翼仿真环境结合
+if __name__ == "__main__":
+    # 初始化PID控制器
+    pid_controller = DualLoopPIDController(
+        mass=1.0,
+        gravity=9.81,
+        desired_position=[0, 0, 10],  # 目标位置
+        desired_velocity=[0, 0, 0],   # 目标速度
+        desired_attitude=[0, 0, 0],   # 目标姿态
+        dt=0.1
+    )
 
-# 测试训练结果
-obs, _ = env.reset()  # Extract only the observation part
-for _ in range(200):
-    action, _states = model.predict(obs, deterministic=True)
-    obs, reward, done, truncated, info = env.step(action)
-    reward_list.append(reward)
-    loss_list.append(0)  # 你可以在此记录模型的损失（如果你有实现损失）
-    # print(f"Position: {env.position:.2f}, Velocity: {env.velocity:.2f}")
-    if done:
-        break
+    # 初始化四旋翼环境
+    env = QuadrotorEnv(
+        mass=3.18,
+        inertia=[0.029618, 0.069585, 0.042503],  # 假设惯性矩阵
+        drag_coeffs=[0.0, 0.0],      # 假设阻力系数
+        gravity=9.81,                 # 重力加速度
+        pid_controller=pid_controller
+    )
 
-# 绘制奖励和损失图
-plot_reward_loss(reward_list, loss_list)
+    # 运行环境并训练
+    state = env.reset()
+    done = False
+    while not done:
+        action = env.action_space.sample()  # 随机选择动作
+        next_state, reward, done, _, _ = env.step(action)
+        print(done)
+        env.render()
+
+
+
+
+def register_quadrotor_env():
+    gym.envs.registration.register(
+        id='Quadrotor-v0',
+        entry_point='__main__:QuadrotorEnv',
+        max_episode_steps=10,
+    )
