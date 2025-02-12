@@ -60,6 +60,7 @@ class DroneSimulation:
         self.time_eval = times
         self.solution.y[6], self.solution.y[7], self.solution.y[8] = \
             self.normalize_euler_angles(self.solution.y[6], self.solution.y[7], self.solution.y[8])
+        return times, states
 
     def data_results(self):
         solution = self.solution

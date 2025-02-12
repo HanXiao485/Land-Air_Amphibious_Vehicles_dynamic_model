@@ -63,11 +63,11 @@ class QuadrotorEnv(gym.Env):
         # 使用RK4积分器计算状态更新
         callback_handler = PIDCallbackHandler(pid_controller)
         integrator = RK4Integrator(self.drone_sim.rigid_body_dynamics, forces)
-        time_eval = np.linspace(0, 0.1, 10)  # 仿真时间步长
-        self.drone_sim.simulate(state, forces, time_span=(0, 10), time_eval=time_eval, callback=callback_handler.callback)
+        time_eval = np.linspace(0, 0.1, 100)  # 仿真时间步长
+        self.times, self.state = self.drone_sim.simulate(state, forces, time_span=(0, 10), time_eval=time_eval, callback=callback_handler.callback)  # self.state为10*12的矩阵，10为时间步数
 
-        # 获取新的状态
-        self.state = self.drone_sim.data_results()
+        # 获取新的状态,上一个仿真时间段内最后一个时间步的输出状态
+        self.state = self.state[-1]
 
         # 判断任务是否完成
         terminated = np.linalg.norm(self.state[0:3]) > 10  # 假设任务完成时超出10米

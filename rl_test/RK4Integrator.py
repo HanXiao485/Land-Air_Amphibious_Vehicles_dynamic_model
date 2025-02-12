@@ -37,7 +37,7 @@ class RK4Integrator:
                 new_state[2] = 0
                 new_state[5] = 0
             if callback is not None:
-                new_forces = callback(time_eval[idx+1], new_state, self.forces)
+                new_forces = callback(time_eval[idx+1], new_state, self.forces)  # Update forces using PID callback
                 if new_forces is not None:
                     self.forces = new_forces
             state = new_state
