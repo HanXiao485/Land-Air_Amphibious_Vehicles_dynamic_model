@@ -10,6 +10,7 @@ from drone_simulation import DroneSimulation
 from dual_loop_pid import DualLoopPIDController
 from RK4Integrator import RK4Integrator
 from call_back import PIDCallbackHandler
+from stable_baselines3.common.callbacks import BaseCallback
 
 
 class QuadrotorEnv(gym.Env):
@@ -18,7 +19,7 @@ class QuadrotorEnv(gym.Env):
 
         # 动作空间：pid参数，四环共36个
         self.action_space = spaces.Box(
-            low=np.array([-0.0]*36),
+            low=np.array([0.0]*36),
             high=np.array([5.0]*36),
             dtype=np.float32
         )
@@ -85,7 +86,7 @@ class QuadrotorEnv(gym.Env):
         # 判断任务是否完成
         self.done_state.append(self.state[2])
         if self.t > 15:
-            if np.mean(self.done_state[-10:]) > 9.8 and np.mean(self.done_state[-10:]) < 10.2:
+            if np.mean(self.done_state[-10:]) > 4.8 and np.mean(self.done_state[-10:]) < 5.2:
                 print(f"mean: {np.mean(self.done_state[-10:])}")
                 terminated = True
             else:
@@ -100,13 +101,13 @@ class QuadrotorEnv(gym.Env):
         self.step_count += 1
         self.t += 1
         
-        print(f"high: {self.state[2]}")
-        print(f"force:" , u_f)
+        # print(f"high: {self.state[2]}")
+        # print(f"force:" , u_f)
 
         # 观测值：当前位置
 
         # 奖励函数：简单的惩罚当前位置越远
-        reward = -np.linalg.norm(self.state[0:3])
+        reward = -abs(self.state[2] - 5)
         # print(f"Step: {self.step_count}, State: {self.state[3]}, force: {u_f}, Reward: {reward}")
         
         return self._normalize_obs(self.state), reward, terminated, False, {}
@@ -140,19 +141,26 @@ if __name__ == "__main__":
         pid_controller=pid_controller
     )
 
+    # 配置TensorBoard日志
+    log_dir = "./tensorboard_logs/"
+    
     model = PPO("MlpPolicy", env, verbose=1,
-            n_steps=256,
-            batch_size=64,
-            policy_kwargs=dict(
-                net_arch=dict(pi=[128,128], vf=[128,128]),  # 缩小网络规模
-                activation_fn=torch.nn.Tanh),  # 添加tanh激活函数
-            learning_rate=1e-4,  # 降低学习率
-            clip_range=0.2,  # 使用默认PPO裁剪范围
-            max_grad_norm=0.5,  # 添加梯度裁剪
-            device='cpu')
+                n_steps=256,
+                batch_size=64,
+                policy_kwargs=dict(
+                    net_arch=dict(pi=[128, 128], vf=[128, 128]),  # 缩小网络规模
+                    activation_fn=torch.nn.Tanh),  # 添加tanh激活函数
+                learning_rate=1e-4,  # 降低学习率
+                clip_range=0.2,  # 使用默认PPO裁剪范围
+                max_grad_norm=0.5,  # 添加梯度裁剪
+                device='cpu',
+                tensorboard_log=log_dir)  # 将TensorBoard日志路径添加到模型配置中
 
     # 训练模型
-    model.learn(total_timesteps=1e5)
+    model.learn(total_timesteps=1e6)
+    
+    # 保存训练后的模型
+    model.save("quadrotor_model")
     
     # 测试训练结果
     obs, _ = env.reset()
