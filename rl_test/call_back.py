@@ -30,7 +30,7 @@ class PIDCallbackHandler:
         # self.pid_controller.Kp_x = 1.0 + 0.0001 * self.iteration_count
         
         # print("pid_kp_z: {}, pid_ki_z: {}, pid_kd_z: {}".format(self.pid_controller.Kp_z, self.pid_controller.Ki_z, self.pid_controller.Kd_z))
-        print("current_state: {}, current_forces: {}".format(current_state, current_forces))
+        # print("current_state: {}, current_forces: {}".format(current_state, current_forces))
 
         new_forces = self.pid_controller.update(current_time, current_state)  # Update the PID controller with the current state and time
         return new_forces

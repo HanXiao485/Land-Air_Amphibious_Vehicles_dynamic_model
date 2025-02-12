@@ -1,3 +1,4 @@
+import torch
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
@@ -46,6 +47,9 @@ class DualLoopPIDController:
         self.desired_velocity = desired_velocity      # Target velocity: (vx_des, vy_des, vz_des)
         self.desired_attitude = desired_attitude      # Target attitude: (phi_des, theta_des, psi_des)
         self.dt = dt
+        
+        # initialize PID controller parameters
+        self.pid_params = np.zeros(36)
 
         # Outer loop PID parameters (Position control)
         self.Kp_x = kp_x; self.Ki_x = ki_x; self.Kd_x = kd_x
@@ -85,6 +89,13 @@ class DualLoopPIDController:
         self.int_r = 0.0; self.last_error_r = 0.0
 
         self.last_time = None
+        
+    def set_pid_params(self, params):
+        """将输入参数映射到合理范围"""
+        # 使用sigmoid缩放比例项到(0, 10)
+        self.pid_params[:18] = 2 * torch.sigmoid(torch.tensor(params[:18]))  
+        # 使用tanh缩放微分项到(-5,5)
+        self.pid_params[18:] = 5 * torch.tanh(torch.tensor(params[18:]))
 
     def update(self, current_time, state):
         """
@@ -97,7 +108,15 @@ class DualLoopPIDController:
         else:
             dt = current_time - self.last_time
         self.last_time = current_time
+        
+        # Extract PID parameters
+        (self.Kp_x, self.Ki_x, self.Kd_x, self.Kp_y, self.Ki_y, self.Kd_y, self.Kp_z, self.Ki_z, self.Kd_z, 
+         self.Kp_vx, self.Ki_vx, self.Kd_vx, self.Kp_vy, self.Ki_vy, self.Kd_vy, self.Kp_vz, self.Ki_vz, self.Kd_vz,
+         self.rate_kp_phi, self.rate_ki_phi, self.rate_kd_phi, self.rate_kp_theta, self.rate_ki_theta, self.rate_kd_theta, self.rate_kp_psi, self.rate_ki_psi, self.rate_kd_psi,
+         self.att_kp_phi, self.att_ki_phi, self.att_kd_phi, self.att_kp_theta, self.att_ki_theta, self.att_kd_theta,self.att_kp_psi, self.att_ki_psi, self.att_kd_psi,) = self.pid_params
 
+        # print(f"kp_x: {self.Kp_x}, ki_x: {self.Ki_x}, kd_x: {self.Kd_x}")
+        
         # Extract state variables
         x, y, z, dx, dy, dz, phi, theta, psi, p, q, r = state
         x_des, y_des, z_des = self.desired_position
@@ -204,6 +223,11 @@ class DualLoopPIDController:
 
         # Update the calculation of lift force to allow free fall when no control is set
         u_f = self.mass * (-self.g + az_des) if az_des is not None else 0  # Allow free fall if no desired acceleration
-        print("u_f: ", u_f)
+        # print("u_f: ", u_f)
+        
+        u_f = np.clip(self.mass * (self.g + az_des), 0, 200)  # 限制升力0-20N
+        tau_phi = np.clip(tau_phi, -5, 5)
+        tau_theta = np.clip(tau_theta, -5,5)
+        tau_psi = np.clip(tau_psi, -5,5)
 
         return [u_f, tau_phi, tau_theta, tau_psi]

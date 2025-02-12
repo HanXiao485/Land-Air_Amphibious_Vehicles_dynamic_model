@@ -30,34 +30,29 @@ class DroneSimulation:
         self.g = gravity
 
     def rigid_body_dynamics(self, t, state, forces):
-        """
-        UAV rigid-body dynamics.
-        State: [x, y, z, dx, dy, dz, phi, theta, psi, p, q, r]
-        Control input: [lift_force, tau_phi, tau_theta, tau_psi]
-        """
         x, y, z, dx, dy, dz, phi, theta, psi, p, q, r = state
         u_f, tau_phi, tau_theta, tau_psi = forces
 
-        ddx = (1 / self.m) * ((np.cos(phi) * np.cos(theta) * np.sin(theta) * u_f) +
-                              np.sin(phi) * np.sin(psi) * u_f - self.k_t * dx)
-        ddy = (1 / self.m) * ((np.cos(phi) * np.sin(theta) * np.sin(psi) -
-                              np.cos(psi) * np.sin(phi)) * u_f - self.k_t * dy)
-        ddz = (1 / self.m) * (np.cos(phi) * np.cos(theta) * u_f - self.m * self.g - self.k_t * dz)
-        if z <= 0 and u_f < self.m * self.g:
+        ddx = (1 / self.m) * ((np.cos(phi)*np.cos(theta)*np.sin(theta)*u_f) +
+                              np.sin(phi)*np.sin(psi)*u_f - self.k_t*dx)
+        ddy = (1 / self.m) * ((np.cos(phi)*np.sin(theta)*np.sin(psi) -
+                              np.cos(psi)*np.sin(phi))*u_f - self.k_t*dy)
+        ddz = (1 / self.m) * (np.cos(phi)*np.cos(theta)*u_f - self.m*self.g - self.k_t*dz)
+        if z <= 0 and u_f < self.m*self.g:
             dz = 0
             ddz = 0
-        dp = (1 / self.Ix) * (-self.k_r * p - q * r * (self.Iz - self.Iy) + tau_phi)
-        dq = (1 / self.Iy) * (-self.k_r * q - r * p * (self.Ix - self.Iz) + tau_theta)
-        dr = (1 / self.Iz) * (-self.k_r * r - p * q * (self.Iy - self.Ix) + tau_psi)
-        dphi = p + np.sin(phi) * np.tan(theta) * q + np.cos(phi) * np.tan(theta) * r
-        dtheta = np.cos(phi) * q - np.sin(phi) * r
-        dpsi = (1 / np.cos(theta)) * (np.sin(phi) * q + np.cos(phi) * r)
+        dp = (1/self.Ix)*(-self.k_r*p - q*r*(self.Iz-self.Iy) + tau_phi)
+        dq = (1/self.Iy)*(-self.k_r*q - r*p*(self.Ix-self.Iz) + tau_theta)
+        dr = (1/self.Iz)*(-self.k_r*r - p*q*(self.Iy-self.Ix) + tau_psi)
+        dphi = p + np.sin(phi)*np.tan(theta)*q + np.cos(phi)*np.tan(theta)*r
+        dtheta = np.cos(phi)*q - np.sin(phi)*r
+        dpsi = (1/np.cos(theta))*(np.sin(phi)*q + np.cos(phi)*r)
         return [dx, dy, dz, ddx, ddy, ddz, dphi, dtheta, dpsi, dp, dq, dr]
 
     def normalize_euler_angles(self, phi, theta, psi):
-        phi = (phi + np.pi) % (2 * np.pi) - np.pi
-        theta = (theta + np.pi) % (2 * np.pi) - np.pi
-        psi = (psi + np.pi) % (2 * np.pi) - np.pi
+        phi = (phi + np.pi) % (2*np.pi) - np.pi
+        theta = (theta + np.pi) % (2*np.pi) - np.pi
+        psi = (psi + np.pi) % (2*np.pi) - np.pi
         return phi, theta, psi
 
     def simulate(self, initial_state, forces, time_span, time_eval, callback=None):
@@ -201,203 +196,149 @@ class DroneSimulation:
 
 
 ########################################################################
-# PID Controller Class with Three Loops (Position, Attitude, Rate)
+# 强化学习可调PID控制器
 ########################################################################
 class DualLoopPIDController:
     """
-    Four-loop PID controller:
-      - Outer loop (Position control): calculates desired acceleration based on position error,
-        then computes the desired velocity.
-      - Second loop (Velocity control): calculates desired velocity based on velocity error.
-      - Middle loop (Attitude control): calculates desired angular rates based on attitude error.
-      - Inner loop (Rate control): calculates control moments from angular rate errors via PID control.
-      
-      The total lift force is computed as:
-          u_f = mass * (g + a_z_des)
+    四环PID控制器，所有参数可通过强化学习调整
     """
-    def __init__(self, mass, gravity, desired_position, desired_velocity, desired_attitude, dt,
-                 # Outer loop PID parameters (Position control)
-                 kp_x=1.0, ki_x=0.0, kd_x=0.5,
-                 kp_y=1.0, ki_y=0.0, kd_y=0.5,
-                 kp_z=2.0, ki_z=0.0, kd_z=1.0,
-                 # Second loop PID parameters (Velocity control)
-                 kp_vx=1.0, ki_vx=0.0, kd_vx=0.5,
-                 kp_vy=1.0, ki_vy=0.0, kd_vy=0.5,
-                 kp_vz=2.0, ki_vz=0.0, kd_vz=1.0,
-                 # Middle loop PID parameters (Attitude control)
-                 att_kp_phi=5.0, att_ki_phi=0.1, att_kd_phi=2.0,
-                 att_kp_theta=5.0, att_ki_theta=0.1, att_kd_theta=2.0,
-                 att_kp_psi=1.0, att_ki_psi=0.0, att_kd_psi=0.2,
-                 # Inner loop PID parameters (Angular rate control)
-                 rate_kp_phi=2.0, rate_ki_phi=0.0, rate_kd_phi=0.5,
-                 rate_kp_theta=2.0, rate_ki_theta=0.0, rate_kd_theta=0.5,
-                 rate_kp_psi=1.0, rate_ki_psi=0.0, rate_kd_psi=0.2):
+    def __init__(self, mass, gravity, desired_position, desired_velocity, desired_attitude, dt):
         self.mass = mass
         self.g = gravity
-        self.desired_position = desired_position      # Target position: (x_des, y_des, z_des)
-        self.desired_velocity = desired_velocity      # Target velocity: (vx_des, vy_des, vz_des)
-        self.desired_attitude = desired_attitude      # Target attitude: (phi_des, theta_des, psi_des)
+        self.desired_position = desired_position
+        self.desired_velocity = desired_velocity
+        self.desired_attitude = desired_attitude
         self.dt = dt
 
-        # Outer loop PID parameters (Position control)
-        self.Kp_x = kp_x; self.Ki_x = ki_x; self.Kd_x = kd_x
-        self.Kp_y = kp_y; self.Ki_y = ki_y; self.Kd_y = kd_y
-        self.Kp_z = kp_z; self.Ki_z = ki_z; self.Kd_z = kd_z
-
-        # Second loop PID parameters (Velocity control)
-        self.Kp_vx = kp_vx; self.Ki_vx = ki_vx; self.Kd_vx = kd_vx
-        self.Kp_vy = kp_vy; self.Ki_vy = ki_vy; self.Kd_vy = kd_vy
-        self.Kp_vz = kp_vz; self.Ki_vz = ki_vz; self.Kd_vz = kd_vz
-
-        # Middle loop PID parameters (Attitude control)
-        self.att_kp_phi = att_kp_phi; self.att_ki_phi = att_ki_phi; self.att_kd_phi = att_kd_phi
-        self.att_kp_theta = att_kp_theta; self.att_ki_theta = att_ki_theta; self.att_kd_theta = att_kd_theta
-        self.att_kp_psi = att_kp_psi; self.att_ki_psi = att_ki_psi; self.att_kd_psi = att_kd_psi
-
-        # Inner loop PID parameters (Angular rate control)
-        self.rate_kp_phi = rate_kp_phi; self.rate_ki_phi = rate_ki_phi; self.rate_kd_phi = rate_kd_phi
-        self.rate_kp_theta = rate_kp_theta; self.rate_ki_theta = rate_ki_theta; self.rate_kd_theta = rate_kd_theta
-        self.rate_kp_psi = rate_kp_psi; self.rate_ki_psi = rate_ki_psi; self.rate_kd_psi = rate_kd_psi
-
-        # Initialize integrations and previous errors
+        # 初始化PID参数容器
+        self.pid_params = np.zeros(36)
+        
+        # 初始化积分项和误差项
+        self._init_integrators()
+        
+    def _init_integrators(self):
+        # 初始化所有积分项和误差记录
         self.int_x = 0.0; self.last_error_x = 0.0
         self.int_y = 0.0; self.last_error_y = 0.0
         self.int_z = 0.0; self.last_error_z = 0.0
-
         self.int_vx = 0.0; self.last_error_vx = 0.0
         self.int_vy = 0.0; self.last_error_vy = 0.0
         self.int_vz = 0.0; self.last_error_vz = 0.0
-
         self.int_phi_att = 0.0; self.last_error_phi_att = 0.0
         self.int_theta_att = 0.0; self.last_error_theta_att = 0.0
         self.int_psi_att = 0.0; self.last_error_psi_att = 0.0
-
         self.int_p = 0.0; self.last_error_p = 0.0
         self.int_q = 0.0; self.last_error_q = 0.0
         self.int_r = 0.0; self.last_error_r = 0.0
-
         self.last_time = None
 
+    def set_pid_params(self, params):
+        """将输入参数映射到合理范围"""
+        # 使用sigmoid缩放比例项到(0, 10)
+        self.pid_params[:18] = 10 * torch.sigmoid(torch.tensor(params[:18]))  
+        # 使用tanh缩放微分项到(-5,5)
+        self.pid_params[18:] = 5 * torch.tanh(torch.tensor(params[18:]))
+
     def update(self, current_time, state):
-        """
-        Compute new control input based on current time and state.
-        State: [x, y, z, dx, dy, dz, phi, theta, psi, p, q, r]
-        Output: [lift_force, tau_phi, tau_theta, tau_psi]
-        """
-        if self.last_time is None:
-            dt = self.dt
-        else:
-            dt = current_time - self.last_time
+        # 解包PID参数
+        (kp_x, ki_x, kd_x, kp_y, ki_y, kd_y, kp_z, ki_z, kd_z,
+         kp_vx, ki_vx, kd_vx, kp_vy, ki_vy, kd_vy, kp_vz, ki_vz, kd_vz,
+         att_kp_phi, att_ki_phi, att_kd_phi, att_kp_theta, att_ki_theta, att_kd_theta,
+         att_kp_psi, att_ki_psi, att_kd_psi,
+         rate_kp_phi, rate_ki_phi, rate_kd_phi, rate_kp_theta, rate_ki_theta, rate_kd_theta,
+         rate_kp_psi, rate_ki_psi, rate_kd_psi) = self.pid_params
+
+        # 计算时间步长
+        dt = self.dt if self.last_time is None else current_time - self.last_time
         self.last_time = current_time
 
-        # Extract state variables
+        # 状态解包
         x, y, z, dx, dy, dz, phi, theta, psi, p, q, r = state
         x_des, y_des, z_des = self.desired_position
         vx_des, vy_des, vz_des = self.desired_velocity
 
-        # Outer loop: Position control
+        # 外环：位置控制
         error_x = x_des - x
         error_y = y_des - y
         error_z = z_des - z
-
+        
         self.int_x += error_x * dt
         self.int_y += error_y * dt
         self.int_z += error_z * dt
-
+        
         d_error_x = (error_x - self.last_error_x) / dt
         d_error_y = (error_y - self.last_error_y) / dt
         d_error_z = (error_z - self.last_error_z) / dt
+        
+        vx_des = kp_x * error_x + ki_x * self.int_x + kd_x * d_error_x
+        vy_des = kp_y * error_y + ki_y * self.int_y + kd_y * d_error_y
+        vz_des = kp_z * error_z + ki_z * self.int_z + kd_z * d_error_z
 
-        self.last_error_x = error_x
-        self.last_error_y = error_y
-        self.last_error_z = error_z
-
-        # Compute desired velocity for the velocity control loop
-        vx_des = self.Kp_x * error_x + self.Ki_x * self.int_x + self.Kd_x * d_error_x
-        vy_des = self.Kp_y * error_y + self.Ki_y * self.int_y + self.Kd_y * d_error_y
-        vz_des = self.Kp_z * error_z + self.Ki_z * self.int_z + self.Kd_z * d_error_z
-
-        # Second loop: Velocity control
+        # 速度环控制
         error_vx = vx_des - dx
         error_vy = vy_des - dy
         error_vz = vz_des - dz
-
+        
         self.int_vx += error_vx * dt
         self.int_vy += error_vy * dt
         self.int_vz += error_vz * dt
-
+        
         d_error_vx = (error_vx - self.last_error_vx) / dt
         d_error_vy = (error_vy - self.last_error_vy) / dt
         d_error_vz = (error_vz - self.last_error_vz) / dt
-
-        self.last_error_vx = error_vx
-        self.last_error_vy = error_vy
-        self.last_error_vz = error_vz
         
-        ax_des = self.Kp_vx * error_vx + self.Ki_vx * self.int_vx + self.Kd_vx * d_error_vx
-        ay_des = self.Kp_vy * error_vy + self.Ki_vy * self.int_vy + self.Kd_vy * d_error_vy
-        az_des = self.Kp_vz * error_vz + self.Ki_vz * self.int_vz + self.Kd_vz * d_error_vz
+        ax_des = kp_vx * error_vx + ki_vx * self.int_vx + kd_vx * d_error_vx
+        ay_des = kp_vy * error_vy + ki_vy * self.int_vy + kd_vy * d_error_vy
+        az_des = kp_vz * error_vz + ki_vz * self.int_vz + kd_vz * d_error_vz
 
-        # Compute desired attitude based on velocity control
-        phi_des_pos = (1.0 / self.g) * ay_des
-        theta_des_pos = (1.0 / self.g) * ax_des
-
-        if self.desired_attitude[0] == 0:
-            phi_des = phi_des_pos
-        else:
-            phi_des = self.desired_attitude[0]
-        if self.desired_attitude[1] == 0:
-            theta_des = theta_des_pos
-        else:
-            theta_des = self.desired_attitude[1]
+        # 期望姿态计算
+        phi_des = (ay_des / self.g)
+        theta_des = -(ax_des / self.g)
         psi_des = self.desired_attitude[2]
 
-        # Middle loop: Attitude control
+        # 姿态环控制
         error_phi = phi_des - phi
         error_theta = theta_des - theta
         error_psi = psi_des - psi
-
+        
         self.int_phi_att += error_phi * dt
         self.int_theta_att += error_theta * dt
         self.int_psi_att += error_psi * dt
+        
+        d_error_phi = (error_phi - self.last_error_phi_att) / dt
+        d_error_theta = (error_theta - self.last_error_theta_att) / dt
+        d_error_psi = (error_psi - self.last_error_psi_att) / dt
+        
+        p_des = att_kp_phi * error_phi + att_ki_phi * self.int_phi_att + att_kd_phi * d_error_phi
+        q_des = att_kp_theta * error_theta + att_ki_theta * self.int_theta_att + att_kd_theta * d_error_theta
+        r_des = att_kp_psi * error_psi + att_ki_psi * self.int_psi_att + att_kd_psi * d_error_psi
 
-        d_error_phi_att = (error_phi - self.last_error_phi_att) / dt
-        d_error_theta_att = (error_theta - self.last_error_theta_att) / dt
-        d_error_psi_att = (error_psi - self.last_error_psi_att) / dt
-
-        self.last_error_phi_att = error_phi
-        self.last_error_theta_att = error_theta
-        self.last_error_psi_att = error_psi
-
-        p_des = self.att_kp_phi * error_phi + self.att_ki_phi * self.int_phi_att + self.att_kd_phi * d_error_phi_att
-        q_des = self.att_kp_theta * error_theta + self.att_ki_theta * self.int_theta_att + self.att_kd_theta * d_error_theta_att
-        r_des = self.att_kp_psi * error_psi + self.att_ki_psi * self.int_psi_att + self.att_kd_psi * d_error_psi_att
-
-        # Inner loop: Angular rate control
+        # 角速度环控制
         error_p = p_des - p
         error_q = q_des - q
         error_r = r_des - r
-
+        
         self.int_p += error_p * dt
         self.int_q += error_q * dt
         self.int_r += error_r * dt
-
+        
         d_error_p = (error_p - self.last_error_p) / dt
         d_error_q = (error_q - self.last_error_q) / dt
         d_error_r = (error_r - self.last_error_r) / dt
+        
+        tau_phi = rate_kp_phi * error_p + rate_ki_phi * self.int_p + rate_kd_phi * d_error_p
+        tau_theta = rate_kp_theta * error_q + rate_ki_theta * self.int_q + rate_kd_theta * d_error_q
+        tau_psi = rate_kp_psi * error_r + rate_ki_psi * self.int_r + rate_kd_psi * d_error_r
 
-        self.last_error_p = error_p
-        self.last_error_q = error_q
-        self.last_error_r = error_r
-
-        tau_phi = self.rate_kp_phi * error_p + self.rate_ki_phi * self.int_p + self.rate_kd_phi * d_error_p
-        tau_theta = self.rate_kp_theta * error_q + self.rate_ki_theta * self.int_q + self.rate_kd_theta * d_error_q
-        tau_psi = self.rate_kp_psi * error_r + self.rate_ki_psi * self.int_r + self.rate_kd_psi * d_error_r
-
-        # Update the calculation of lift force to allow free fall when no control is set
-        u_f = self.mass * (-self.g + az_des) if az_des is not None else 0  # Allow free fall if no desired acceleration
-        # print("u_f: ", u_f)
-
+        # 升力计算
+        u_f = self.mass * (self.g + az_des)
+        
+        # 添加控制量限幅
+        u_f = np.clip(self.mass * (self.g + az_des), 0, 200)  # 限制升力0-20N
+        tau_phi = np.clip(tau_phi, -5, 5)
+        tau_theta = np.clip(tau_theta, -5,5)
+        tau_psi = np.clip(tau_psi, -5,5)
+        
         return [u_f, tau_phi, tau_theta, tau_psi]
     
     
@@ -467,34 +408,57 @@ class PIDCallbackHandler:
         return new_forces
     
     
+########################################################################
+# 强化学习环境
+########################################################################
 class QuadrotorEnv(gym.Env):
-    def __init__(self, mass, inertia, drag_coeffs, gravity, pid_controller):
+    def __init__(self, initial_state, target_position, target_attitude):
         super(QuadrotorEnv, self).__init__()
-
-        # 动作空间：升力u_f，三个力矩tau_phi, tau_theta, tau_psi
-        self.action_space = spaces.Box(
-            low=np.array([0.0, -10.0, -10.0, -10.0]),
-            high=np.array([10.0, 10.0, 10.0, 10.0]),
-            dtype=np.float32
-        )
-
-        # 观测空间：位置（x, y, z），速度（dx, dy, dz），姿态角（phi, theta, psi），角速度（p, q, r）
-        self.observation_space = spaces.Box(
-            low=np.array([-np.inf, -np.inf, 0, -np.inf, -np.inf, -np.inf, -np.pi, -np.pi, -np.pi, -np.inf, -np.inf, -np.inf], dtype=np.float32),
-            high=np.array([np.inf, np.inf, 10, np.inf, np.inf, np.inf, np.pi, np.pi, np.pi, np.inf, np.inf, np.inf], dtype=np.float32),
-            dtype=np.float32
-        )
-
-        # 初始化PID控制器和四旋翼动力学模型
-        self.pid_controller = pid_controller
-        self.drone_sim = DroneSimulation(mass, inertia, drag_coeffs, gravity)
-
-        # 初始状态（例如：初始为静止状态）
-        self.state = np.zeros(12)
-        self.done = False
         
-        # 初始化计数器
+        # 动作空间：36个PID参数，范围[0, 20]
+        self.action_space = spaces.Box(
+            low=0.0,
+            high=200.0,
+            shape=(36,),
+            dtype=np.float32
+        )
+
+        # 观测空间
+        self.observation_space = spaces.Box(
+            low=np.array([-np.inf]*12),
+            high=np.array([np.inf]*12),
+            dtype=np.float32
+        )
+
+        # 初始化无人机模型
+        self.drone = DroneSimulation(
+            mass=3.18,
+            inertia=[0.1, 0.1, 0.1],
+            drag_coeffs=[0.1, 0.1],
+            gravity=9.81
+        )
+        
+        # 初始化PID控制器
+        self.pid = DualLoopPIDController(
+            mass=3.18,
+            gravity=9.81,
+            desired_position=target_position,
+            desired_velocity=[0,0,0],
+            desired_attitude=target_attitude,
+            dt=0.01
+        )
+        
+        # 初始状态参数
+        self.initial_state = initial_state
+        self.state = initial_state.copy()
         self.step_count = 0
+        
+        # 添加观测标准化参数
+        self.obs_mean = np.zeros(12)
+        self.obs_std = np.ones(12)
+        
+    def _normalize_obs(self, obs):
+        return (obs - self.obs_mean) / (self.obs_std + 1e-8)
 
     def reset(self, seed=None, **kwargs):
         # 如果传入了seed参数，则使用它来初始化随机数生成器
@@ -504,40 +468,39 @@ class QuadrotorEnv(gym.Env):
         return self.state, {}
 
     def step(self, action):
-        """根据动作更新环境状态"""
-        # 使用PID控制器根据当前状态计算控制输入
-
-        u_f, tau_phi, tau_theta, tau_psi = self.pid_controller.update(
-            current_time=self.step_count, state=self.state
+        # 设置PID参数
+        self.pid.set_pid_params(action)
+        
+        # 运行控制周期
+        control = self.pid.update(self.step_count*0.01, self.state)
+        time_eval = np.linspace(0, 0.01, 2)
+        _, new_states = self.drone.simulate(
+            self.state, control, 
+            time_span=(0,0.01),
+            time_eval=time_eval
         )
-
-        # 将PID控制器生成的控制输入传递给四旋翼动力学模型
-        forces = [u_f, tau_phi, tau_theta, tau_psi]
-        t = self.step_count  # 当前时间步
-        state = self.state
-
-        # 使用RK4积分器计算状态更新
-        callback_handler = PIDCallbackHandler(pid_controller)
-        integrator = RK4Integrator(self.drone_sim.rigid_body_dynamics, forces)
-        time_eval = np.linspace(0, 0.1, 100)  # 仿真时间步长
-        self.times, self.state = self.drone_sim.simulate(state, forces, time_span=(0, 10), time_eval=time_eval, callback=callback_handler.callback)  # self.state为10*12的矩阵，10为时间步数
-
-        # 获取上一轮仿真的最终状态,上一个仿真时间段内最后一个时间步的输出状态
-        self.state = self.state[-1]
-
-        # 判断任务是否完成
-        terminated = np.linalg.norm(self.state[0:3]) > 10  # 假设任务完成时超出10米
-        terminated = self.state[2] > 10  # 假设任务完成时超出10米
-        term = np.linalg.norm(self.state[0:3])
-        # print("terminated:", term)
+        
+        # 更新状态
+        self.state = new_states[-1]
         self.step_count += 1
-
-        # 奖励函数：简单的惩罚当前位置越远
-        # reward = -np.linalg.norm(self.state[0:3])
-        reward = -(10 - self.state[2])
-        print("reward:", reward)
-
-        return self.state, reward, terminated, {}, {}
+        
+        # 在状态更新后添加数值检查
+        if np.any(np.isnan(self.state)):
+            print(f"Invalid state detected at step {self.step_count}!")
+            self.state = np.nan_to_num(self.state)  # 自动替换NaN为0
+            reward = -1000  # 给予极大惩罚
+            done = True
+        
+        # 计算奖励
+        pos_error = np.linalg.norm(self.state[:3] - self.pid.desired_position)
+        att_error = np.linalg.norm(self.state[6:9] - self.pid.desired_attitude)
+        reward = - (pos_error + 0.1*att_error)
+        
+        # 终止条件
+        done = pos_error < 0.1 or self.step_count >= 500
+        
+        return self._normalize_obs(self.state), reward, done, False, {}
+        # return self.state, reward, terminated, {}, {}
 
     def render(self):
         """渲染环境状态"""
@@ -559,42 +522,39 @@ class MyCallback(BaseCallback):
 
 
     
-# 使用 PID 控制器与四旋翼仿真环境结合
+########################################################################
+# 训练和测试
+########################################################################
 if __name__ == "__main__":
-    pid_controller = DualLoopPIDController(
-        mass=1.0,
-        gravity=9.81,
-        desired_position=[0, 0, 10],  # 目标位置
-        desired_velocity=[0, 0, 0],   # 目标速度
-        desired_attitude=[0, 0, 0],   # 目标姿态
-        dt=0.1
-    )
+    # 初始化环境参数
+    initial_state = np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+    target_position = [0, 0, 5]
+    target_attitude = [0, 0, 0]
 
-    env = QuadrotorEnv(
-        mass=3.18,
-        inertia=[0.029618, 0.069585, 0.042503],
-        drag_coeffs=[0.0, 0.0],
-        gravity=9.81,
-        pid_controller=pid_controller
-    )
-
-    model = PPO("MlpPolicy", 
-                env, 
-                verbose=1,
-                n_steps=256,
-                batch_size=64,
-                )
+    # 创建环境
+    env = QuadrotorEnv(initial_state, target_position, target_attitude)
     
-    model.learn(total_timesteps=10000, callback=MyCallback())
-    print("=== 训练结束 ===")
-
-    # Test the trained model
-    state, _ = env.reset()
-    done = False
-    while not done:
-        action, _ = model.predict(state)
-        state, reward, done, _, _ = env.step(action)
-        env.render()
+    # 创建PPO模型
+    model = PPO("MlpPolicy", env, verbose=1,
+            policy_kwargs=dict(
+                net_arch=dict(pi=[128,128], vf=[128,128]),  # 缩小网络规模
+                activation_fn=torch.nn.Tanh),  # 添加tanh激活函数
+            learning_rate=1e-4,  # 降低学习率
+            clip_range=0.2,  # 使用默认PPO裁剪范围
+            max_grad_norm=0.5,  # 添加梯度裁剪
+            device='cpu')
+    
+    # 训练模型
+    model.learn(total_timesteps=1e5)
+    
+    # 测试训练结果
+    obs, _ = env.reset()
+    for _ in range(500):
+        action, _ = model.predict(obs)
+        obs, _, done, _ = env.step(action)
+        if done:
+            break
+    print("Final position:", obs[:3])
 
 
 # # 使用PID控制器与四旋翼仿真环境结合
