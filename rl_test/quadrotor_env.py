@@ -110,33 +110,17 @@ class QuadrotorEnv(gym.Env):
         self.step_count += 1
         self.t += 1
 
-        # def reward_function(self, state):
-        #     # 奖励函数：简单的惩罚当前位置越远
-        #     mean = np.mean(self.reward_state[-1])
-        #     var = np.var(self.reward_state, ddof=1)
+        def reward_function(state):
+            # 奖励函数：简单的惩罚当前位置越远
+            mean = np.mean(state[-1])
+            var = np.var(state, ddof=1)
             
-        #     if mean > 3.0 and mean < 20.0 :
-        #         reward = 1000
-        #         if mean > 5.0 and mean < 5.2 :
-        #             reward = 10000
+            reward = -(abs(mean - 5) ** 2 )
             
-        #     elif mean < 0.2 or mean > 15.0:
-        #         reward = -10000
-                
-        #     else :
-        #         reward = - (abs( mean - 5 ) ** 2)
-            
-        #     return reward
+            return reward
         
-        def reward_function(self, state):
-            mean = np.mean(state[0:3])
-            var = np.var(state[0:3])
-            if mean > 4.8 and mean < 5.2:
-                return 1000
-            else:
-                return -np.abs(mean - 5) ** 2
         
-        reward = reward_function(self, self.state)
+        reward = reward_function(self.reward_state)
         # reward = -abs(self.state[2] - 5) - 0.1 * np.sum(np.square(self.state[3:6])) - 0.1 * np.sum(np.square(self.state[6:9]))
         # print(f"Step: {self.step_count}, State: {self.state[3]}, force: {u_f}, Reward: {reward}")
         
