@@ -2,7 +2,7 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 import torch
-from stable_baselines3 import PPO
+from stable_baselines3 import PPO, SAC, TD3
 from stable_baselines3.common.env_checker import check_env
 import matplotlib.pyplot as plt
 
@@ -14,13 +14,13 @@ from stable_baselines3.common.callbacks import BaseCallback
 
 
 class QuadrotorEnv(gym.Env):
-    def __init__(self, mass, inertia, drag_coeffs, gravity, pid_controller):
+    def __init__(self, mass, inertia, drag_coeffs, gravity, pid_params):
         super(QuadrotorEnv, self).__init__()
 
         # 动作空间：pid参数，四环共36个
         self.action_space = spaces.Box(
-            low=np.array([0.0]*36),
-            high=np.array([5.0]*36),
+            low=np.array([0.1]*36),
+            high=np.array([6.0]*36),
             dtype=np.float32
         )
 
@@ -32,7 +32,14 @@ class QuadrotorEnv(gym.Env):
         )
 
         # 初始化PID控制器和四旋翼动力学模型
-        self.pid_controller = pid_controller
+        self.pid_controller = DualLoopPIDController(
+            mass=pid_params['mass'],
+            gravity=pid_params['gravity'],
+            desired_position=pid_params['desired_position'],
+            desired_velocity=pid_params['desired_velocity'],
+            desired_attitude=pid_params['desired_attitude'],
+            dt=pid_params['dt']
+        )
         self.drone_sim = DroneSimulation(mass, inertia, drag_coeffs, gravity)
 
         # 初始状态（例如：初始为静止状态）
@@ -54,6 +61,7 @@ class QuadrotorEnv(gym.Env):
         self.state = np.zeros(12)  # 初始状态为零
         self.done = False
         self.done_state = []
+        self.reward_state = []
         self.t = 0
         return self.state, {}
 
@@ -75,12 +83,13 @@ class QuadrotorEnv(gym.Env):
         state = self.state
 
         # 使用RK4积分器计算状态更新
-        callback_handler = PIDCallbackHandler(pid_controller)
+        callback_handler = PIDCallbackHandler(self.pid_controller)
         integrator = RK4Integrator(self.drone_sim.rigid_body_dynamics, forces)
         time_eval = np.linspace(0, 0.1, 100)  # 仿真时间步长
         self.times, self.state = self.drone_sim.simulate(state, forces, time_span=(0, 10), time_eval=time_eval, callback=callback_handler.callback)  # self.state为10*12的矩阵，10为时间步数
 
         # 获取新的状态,上一个仿真时间段内最后一个时间步的输出状态
+        self.reward_state.append(self.state[:, 2])
         self.state = self.state[-1]
 
         # 判断任务是否完成
@@ -100,15 +109,39 @@ class QuadrotorEnv(gym.Env):
         # terminated = np.linalg.norm(self.state[0:3]) > 10  # 假设任务完成时超出10米
         self.step_count += 1
         self.t += 1
+
+        # def reward_function(self, state):
+        #     # 奖励函数：简单的惩罚当前位置越远
+        #     mean = np.mean(self.reward_state[-1])
+        #     var = np.var(self.reward_state, ddof=1)
+            
+        #     if mean > 3.0 and mean < 20.0 :
+        #         reward = 1000
+        #         if mean > 5.0 and mean < 5.2 :
+        #             reward = 10000
+            
+        #     elif mean < 0.2 or mean > 15.0:
+        #         reward = -10000
+                
+        #     else :
+        #         reward = - (abs( mean - 5 ) ** 2)
+            
+        #     return reward
         
-        # print(f"high: {self.state[2]}")
-        # print(f"force:" , u_f)
-
-        # 观测值：当前位置
-
-        # 奖励函数：简单的惩罚当前位置越远
-        reward = -abs(self.state[2] - 5)
+        def reward_function(self, state):
+            mean = np.mean(state[0:3])
+            var = np.var(state[0:3])
+            if mean > 4.8 and mean < 5.2:
+                return 1000
+            else:
+                return -np.abs(mean - 5) ** 2
+        
+        reward = reward_function(self, self.state)
+        # reward = -abs(self.state[2] - 5) - 0.1 * np.sum(np.square(self.state[3:6])) - 0.1 * np.sum(np.square(self.state[6:9]))
         # print(f"Step: {self.step_count}, State: {self.state[3]}, force: {u_f}, Reward: {reward}")
+        
+        if terminated:
+            print(f"high: {self.reward_state[-1]}, \n force: {u_f} \n reward: {reward}")
         
         return self._normalize_obs(self.state), reward, terminated, False, {}
 
@@ -120,17 +153,19 @@ class QuadrotorEnv(gym.Env):
         """关闭环境"""
         pass
 
+
+
 # 使用PID控制器与四旋翼仿真环境结合
 if __name__ == "__main__":
-    # 初始化PID控制器
-    pid_controller = DualLoopPIDController(
-        mass=3.18,
-        gravity=9.81,
-        desired_position=[0, 0, 5],  # 目标位置
-        desired_velocity=[0, 0, 0],   # 目标速度
-        desired_attitude=[0, 0, 0],   # 目标姿态
-        dt=0.1
-    )
+    # PID控制器的参数
+    pid_params = {
+        'mass': 3.18,
+        'gravity': 9.81,
+        'desired_position': [0, 0, 5],  # 目标位置
+        'desired_velocity': [0, 0, 0],   # 目标速度
+        'desired_attitude': [0, 0, 0],   # 目标姿态
+        'dt': 0.1
+    }
 
     # 初始化四旋翼环境
     env = QuadrotorEnv(
@@ -138,21 +173,21 @@ if __name__ == "__main__":
         inertia=[0.029618, 0.069585, 0.042503],  # 假设惯性矩阵
         drag_coeffs=[0.0, 0.0],      # 假设阻力系数
         gravity=9.81,                 # 重力加速度
-        pid_controller=pid_controller
+        pid_params=pid_params  # 将PID控制器的参数传递给环境
     )
 
     # 配置TensorBoard日志
     log_dir = "./tensorboard_logs/"
     
     model = PPO("MlpPolicy", env, verbose=1,
-                n_steps=256,
-                batch_size=64,
+                n_steps=512,
+                batch_size=128,
                 policy_kwargs=dict(
-                    net_arch=dict(pi=[128, 128], vf=[128, 128]),  # 缩小网络规模
-                    activation_fn=torch.nn.Tanh),  # 添加tanh激活函数
-                learning_rate=1e-4,  # 降低学习率
-                clip_range=0.2,  # 使用默认PPO裁剪范围
-                max_grad_norm=0.5,  # 添加梯度裁剪
+                    net_arch=dict(pi=[256, 256], vf=[256, 256]),  # 缩小网络规模
+                    activation_fn=torch.nn.ReLU),  # 添加tanh激活函数
+                learning_rate=3e-4,  # 降低学习率
+                clip_range=0.3,  # 使用默认PPO裁剪范围
+                max_grad_norm=0.7,  # 添加梯度裁剪
                 device='cpu',
                 tensorboard_log=log_dir)  # 将TensorBoard日志路径添加到模型配置中
 
@@ -170,9 +205,7 @@ if __name__ == "__main__":
         if done:
             break
     print("Final position:", obs[:3])
-
-
-
+    
 
 def register_quadrotor_env():
     gym.envs.registration.register(
