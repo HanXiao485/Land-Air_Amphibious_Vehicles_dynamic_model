@@ -92,6 +92,9 @@ class DualLoopPIDController:
 
         self.last_time = None
         
+        self.z_des_list = []
+        
+        
     def set_pid_params(self, params):
         """将输入参数映射到合理范围"""
         # # 使用sigmoid缩放比例项到(0, 10)
@@ -139,6 +142,8 @@ class DualLoopPIDController:
         x, y, z, dx, dy, dz, phi, theta, psi, p, q, r = state
         x_des, y_des, z_des = self.desired_position.get_position(current_time)
         vx_des, vy_des, vz_des = self.desired_velocity
+        
+        self.z_des_list.append(z_des)
 
         # Outer loop: Position control
         error_x = x_des - x
@@ -249,3 +254,6 @@ class DualLoopPIDController:
         tau_psi = np.clip(tau_psi, -5,5)
 
         return [u_f, tau_phi, tau_theta, tau_psi]
+    
+    def get_des_list(self):
+        return self.z_des_list

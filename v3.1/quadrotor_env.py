@@ -73,6 +73,17 @@ class QuadrotorEnv(gym.Env):
         self.done_state = []
         self.reward_state = []
         self.t = 0
+        self.state_list = []
+        
+        self.curve = Curve(a=0.0, b=0.0, c=0.0, d=0.0, e=1.0, w=0.0)
+        self.pid_controller = DualLoopPIDController(
+            mass=pid_params['mass'],
+            gravity=pid_params['gravity'],
+            desired_position = self.curve,
+            desired_velocity=pid_params['desired_velocity'],
+            desired_attitude=pid_params['desired_attitude'],
+            dt=pid_params['dt']
+        )
         return self.state, {}
 
     def step(self, action):
@@ -84,9 +95,8 @@ class QuadrotorEnv(gym.Env):
             current_time=self.t, state=self.state
         )
         
-        # def normalize_value(value, min_val, max_val):
-        #     return max(min_val, min(max_val, value))
-        # u_f = normalize_value(u_f, 0, 50)
+        # 获取PID控制器生成的期望值，一次update后生成一个期望值
+        z_des_list = self.pid_controller.get_des_list()
 
         # 将PID控制器生成的控制输入传递给四旋翼动力学模型
         forces = [u_f, tau_phi, tau_theta, tau_psi]
@@ -97,6 +107,9 @@ class QuadrotorEnv(gym.Env):
         integrator = RK4Integrator(self.drone_sim.rigid_body_dynamics, forces)
         time_eval = np.linspace(0, 0.1, 100)  # 仿真时间步长
         self.times, self.state = self.drone_sim.simulate(state, forces, time_span=(0, 10), time_eval=time_eval, callback=callback_handler.callback)  # self.state为10*12的矩阵，10为时间步数
+        
+        # 上一个仿真时间段内，每一个时间步后的仿真结果
+        self.state_list.append(self.state[:, 2][-1])
 
         # 获取新的状态,上一个仿真时间段内最后一个时间步的输出状态
         self.reward_state.append(self.state[:, 2])
@@ -114,12 +127,12 @@ class QuadrotorEnv(gym.Env):
             
         
         current_time = self.t
-        def reward_function(state, current_time):
+        def reward_function(state, des_list, current_time):
             # 奖励函数：简单的惩罚当前位置越远
-            mean = np.mean(state[-1])
-            var = np.var(state, ddof=1)
+            mean = np.sum(abs(np.array(state) - np.array(des_list)))
+            var = np.var(np.array(state) - np.array(des_list), ddof=1)
             
-            reward = -(np.abs(state[2] - self.curve.get_position(current_time)[2]) + np.abs(state[1] - self.curve.get_position(current_time)[1]) + np.abs(state[0] - self.curve.get_position(current_time)[0]))
+            reward = - mean
             
             return reward
         
@@ -127,7 +140,7 @@ class QuadrotorEnv(gym.Env):
         self.step_count += 1
         self.t += 1
         
-        reward = reward_function(self.state, current_time)
+        reward = reward_function(self.state_list, z_des_list, current_time)
         # reward = -abs(self.state[2] - 5) - 0.1 * np.sum(np.square(self.state[3:6])) - 0.1 * np.sum(np.square(self.state[6:9]))
         # print(f"Step: {self.step_count}, State: {self.state[3]}, force: {u_f}, Reward: {reward}")
         
