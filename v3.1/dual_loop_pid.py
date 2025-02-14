@@ -9,6 +9,8 @@ import tkinter as tk
 from tkinter import ttk
 from tkinter import messagebox
 
+from curve import Curve
+
 ########################################################################
 # PID Controller Class with Three Loops (Position, Attitude, Rate)
 ########################################################################
@@ -24,7 +26,7 @@ class DualLoopPIDController:
       The total lift force is computed as:
           u_f = mass * (g + a_z_des)
     """
-    def __init__(self, mass, gravity, desired_position, desired_velocity, desired_attitude, dt,
+    def __init__(self, mass, gravity, desired_position, desired_velocity:Curve, desired_attitude, dt,
                  # Outer loop PID parameters (Position control)
                  kp_x=1.0, ki_x=0.0, kd_x=0.5,
                  kp_y=1.0, ki_y=0.0, kd_y=0.5,
@@ -135,7 +137,7 @@ class DualLoopPIDController:
         
         # Extract state variables
         x, y, z, dx, dy, dz, phi, theta, psi, p, q, r = state
-        x_des, y_des, z_des = self.desired_position
+        x_des, y_des, z_des = self.desired_position.get_position(current_time)
         vx_des, vy_des, vz_des = self.desired_velocity
 
         # Outer loop: Position control

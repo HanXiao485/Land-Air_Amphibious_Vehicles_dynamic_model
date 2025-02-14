@@ -11,6 +11,7 @@ from dual_loop_pid import DualLoopPIDController
 from RK4Integrator import RK4Integrator
 from call_back import PIDCallbackHandler
 from stable_baselines3.common.callbacks import BaseCallback
+from curve import Curve
 
 
 class QuadrotorEnv(gym.Env):
@@ -37,12 +38,14 @@ class QuadrotorEnv(gym.Env):
             high=np.array([np.inf, np.inf, np.inf, np.inf, np.inf, np.inf, np.pi, np.pi, np.pi, np.inf, np.inf, np.inf], dtype=np.float32),
             dtype=np.float32
         )
+        
+        self.curve = Curve(a=0.0, b=0.0, c=0.0, d=0.0, e=1.0, w=0.0)
 
         # 初始化PID控制器和四旋翼动力学模型
         self.pid_controller = DualLoopPIDController(
             mass=pid_params['mass'],
             gravity=pid_params['gravity'],
-            desired_position=pid_params['desired_position'],
+            desired_position = self.curve,
             desired_velocity=pid_params['desired_velocity'],
             desired_attitude=pid_params['desired_attitude'],
             dt=pid_params['dt']
@@ -78,7 +81,7 @@ class QuadrotorEnv(gym.Env):
         
         # 使用PID控制器根据当前状态计算控制输入
         u_f, tau_phi, tau_theta, tau_psi = self.pid_controller.update(
-            current_time=self.step_count, state=self.state
+            current_time=self.t, state=self.state
         )
         
         # def normalize_value(value, min_val, max_val):
@@ -101,42 +104,36 @@ class QuadrotorEnv(gym.Env):
 
         # 判断任务是否完成
         self.done_state.append(self.state[2])
-        if self.t > 15:
-            if np.mean(self.done_state[-10:]) > 4.8 and np.mean(self.done_state[-10:]) < 5.2:
-                print(f"mean: {np.mean(self.done_state[-10:])}")
-                terminated = True
-            else:
-                terminated = False
+        
+        if self.state[2] > 3000:
+            terminated = True
+        elif self.t > 2000:
+            terminated = True
         else:
             terminated = False
             
-        if self.state[2] > 20:
-            terminated = True
-        elif self.t > 100:
-            terminated = True
-            
         
-        # terminated = np.linalg.norm(self.state[0:3]) > 10  # 假设任务完成时超出10米
-        self.step_count += 1
-        self.t += 1
-
-        def reward_function(state):
+        current_time = self.t
+        def reward_function(state, current_time):
             # 奖励函数：简单的惩罚当前位置越远
             mean = np.mean(state[-1])
             var = np.var(state, ddof=1)
             
-            reward = -(np.exp(abs(mean - 5)))
+            reward = -(np.abs(state[2] - self.curve.get_position(current_time)[2]) + np.abs(state[1] - self.curve.get_position(current_time)[1]) + np.abs(state[0] - self.curve.get_position(current_time)[0]))
             
             return reward
         
+        # terminated = np.linalg.norm(self.state[0:3]) > 10  # 假设任务完成时超出10米
+        self.step_count += 1
+        self.t += 1
         
-        reward = reward_function(self.reward_state)
+        reward = reward_function(self.state, current_time)
         # reward = -abs(self.state[2] - 5) - 0.1 * np.sum(np.square(self.state[3:6])) - 0.1 * np.sum(np.square(self.state[6:9]))
         # print(f"Step: {self.step_count}, State: {self.state[3]}, force: {u_f}, Reward: {reward}")
         
         if terminated:
             print(f"high: {self.reward_state[-1][-5:]}, \n force: {u_f} \n reward: {reward}")
-            print(f"kp_x: {action[0]}, ki_x: {action[1]}, kd_x: {action[2]}")
+            # print(f"kp_x: {action[0]}, ki_x: {action[1]}, kd_x: {action[2]}")
         
         return self._normalize_obs(self.state), reward, terminated, False, {}
 
