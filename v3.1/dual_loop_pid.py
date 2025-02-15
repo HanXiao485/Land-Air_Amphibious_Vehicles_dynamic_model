@@ -28,21 +28,21 @@ class DualLoopPIDController:
     """
     def __init__(self, mass, gravity, desired_position, desired_velocity:Curve, desired_attitude, dt,
                  # Outer loop PID parameters (Position control)
-                 kp_x=1.0, ki_x=0.0, kd_x=0.5,
-                 kp_y=1.0, ki_y=0.0, kd_y=0.5,
-                 kp_z=2.0, ki_z=0.0, kd_z=1.0,
+                 kp_x=0.0, ki_x=0.0, kd_x=0.0,
+                 kp_y=0.0, ki_y=0.0, kd_y=0.0,
+                 kp_z=0.0, ki_z=0.0, kd_z=0.0,
                  # Second loop PID parameters (Velocity control)
-                 kp_vx=1.0, ki_vx=0.0, kd_vx=0.5,
-                 kp_vy=1.0, ki_vy=0.0, kd_vy=0.5,
-                 kp_vz=2.0, ki_vz=0.0, kd_vz=1.0,
+                 kp_vx=0.0, ki_vx=0.0, kd_vx=0.0,
+                 kp_vy=0.0, ki_vy=0.0, kd_vy=0.0,
+                 kp_vz=0.0, ki_vz=0.0, kd_vz=0.0,
                  # Middle loop PID parameters (Attitude control)
-                 att_kp_phi=5.0, att_ki_phi=0.1, att_kd_phi=2.0,
-                 att_kp_theta=5.0, att_ki_theta=0.1, att_kd_theta=2.0,
-                 att_kp_psi=1.0, att_ki_psi=0.0, att_kd_psi=0.2,
+                 att_kp_phi=0.0, att_ki_phi=0.0, att_kd_phi=0.0,
+                 att_kp_theta=5.0, att_ki_theta=0.1, att_kd_theta=0.0,
+                 att_kp_psi=0.0, att_ki_psi=0.0, att_kd_psi=0.0,
                  # Inner loop PID parameters (Angular rate control)
-                 rate_kp_phi=2.0, rate_ki_phi=0.0, rate_kd_phi=0.5,
-                 rate_kp_theta=2.0, rate_ki_theta=0.0, rate_kd_theta=0.5,
-                 rate_kp_psi=1.0, rate_ki_psi=0.0, rate_kd_psi=0.2):
+                 rate_kp_phi=0.0, rate_ki_phi=0.0, rate_kd_phi=0.0,
+                 rate_kp_theta=0.0, rate_ki_theta=0.0, rate_kd_theta=0.0,
+                 rate_kp_psi=0.0, rate_ki_psi=0.0, rate_kd_psi=0.0):
         self.mass = mass
         self.g = gravity
         self.desired_position = desired_position      # Target position: (x_des, y_des, z_des)
@@ -134,7 +134,7 @@ class DualLoopPIDController:
         #  self.rate_kp_phi, self.rate_ki_phi, self.rate_kd_phi, self.rate_kp_theta, self.rate_ki_theta, self.rate_kd_theta, self.rate_kp_psi, self.rate_ki_psi, self.rate_kd_psi,
         #  self.att_kp_phi, self.att_ki_phi, self.att_kd_phi, self.att_kp_theta, self.att_ki_theta, self.att_kd_theta,self.att_kp_psi, self.att_ki_psi, self.att_kd_psi,) = self.pid_params
 
-        (self.Kp_z, self.Ki_z, self.Kd_z) = self.pid_params
+        (self.Kp_z, self.Ki_z, self.Kd_z, self.Kp_vz, self.Ki_vz, self.Kd_vz) = self.pid_params
 
         # print(f"kp_z: {self.Kp_z}, ki_z: {self.Ki_z}, kd_z: {self.Kd_z}")
         
@@ -149,6 +149,7 @@ class DualLoopPIDController:
         error_x = x_des - x
         error_y = y_des - y
         error_z = z_des - z
+        print(f"error_z: {error_z}")
 
         self.int_x += error_x * dt
         self.int_y += error_y * dt
@@ -246,9 +247,9 @@ class DualLoopPIDController:
 
         # Update the calculation of lift force to allow free fall when no control is set
         u_f = self.mass * (-self.g + az_des) if az_des is not None else 0  # Allow free fall if no desired acceleration
-        # print("u_f: ", u_f)
+        print("az_des: ", az_des)
         
-        u_f = np.clip(self.mass * (self.g + az_des), 0, 200)  # 限制升力0-20N
+        u_f = np.clip(self.mass * (-self.g + az_des), 0, 200)  # 限制升力0-20N
         tau_phi = np.clip(tau_phi, -5, 5)
         tau_theta = np.clip(tau_theta, -5,5)
         tau_psi = np.clip(tau_psi, -5,5)

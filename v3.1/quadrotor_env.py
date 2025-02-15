@@ -25,11 +25,11 @@ class QuadrotorEnv(gym.Env):
         #     dtype=np.float32
         # )
         
-        # 动作空间：pid参数，z方向共3个
+        # 动作空间：pid参数，z方向共6个
         self.action_space = spaces.Box(
-            low=np.array([0.0]*3),
-            high=np.array([10.0]*3),
-            dtype=np.float32
+            low=np.array([0.0]*6, dtype=np.int8),
+            high=np.array([10.0]*6, dtype=np.int8),
+            dtype=np.int8
         )
 
         # 观测空间：位置（x, y, z），速度（dx, dy, dz），姿态角（phi, theta, psi），角速度（p, q, r）
@@ -94,6 +94,8 @@ class QuadrotorEnv(gym.Env):
         u_f, tau_phi, tau_theta, tau_psi = self.pid_controller.update(
             current_time=self.t, state=self.state
         )
+        print("u_f: ", u_f, "tau_phi: ", tau_phi, "tau_theta: ", tau_theta, "tau_psi: ", tau_psi)
+        print("======================================================================================")
         
         # 获取PID控制器生成的期望值，一次update后生成一个期望值
         z_des_list = self.pid_controller.get_des_list()
@@ -110,7 +112,11 @@ class QuadrotorEnv(gym.Env):
         
         # 上一个仿真时间段内，每一个时间步后的仿真结果
         self.state_list.append(self.state[:, 2][-1])
-
+        
+        # # 判断加速度
+        # if self.t > 0:
+        #     print(f"error = {self.state_list[-1] - self.state_list[-2]}")
+            
         # 获取新的状态,上一个仿真时间段内最后一个时间步的输出状态
         self.reward_state.append(self.state[:, 2])
         self.state = self.state[-1]
@@ -129,10 +135,10 @@ class QuadrotorEnv(gym.Env):
         current_time = self.t
         def reward_function(state, des_list, current_time):
             # 奖励函数：简单的惩罚当前位置越远
-            mean = np.sum(abs(np.array(state) - np.array(des_list)))
-            var = np.var(np.array(state) - np.array(des_list), ddof=1)
+            mean = np.mean(abs(np.array(state) - np.array(des_list)))
+            var = np.var(np.array(state) - np.array(des_list), ddof=0)
             
-            reward = - mean
+            reward = - mean - 0.01*var + current_time  
             
             return reward
         
@@ -145,8 +151,9 @@ class QuadrotorEnv(gym.Env):
         # print(f"Step: {self.step_count}, State: {self.state[3]}, force: {u_f}, Reward: {reward}")
         
         if terminated:
+            # print(f"time: {current_time}, \n state_list: {np.array(self.state_list)}, \n des_list: {np.array(z_des_list)} \n ")
             print(f"high: {self.reward_state[-1][-5:]}, \n force: {u_f} \n reward: {reward}")
-            # print(f"kp_x: {action[0]}, ki_x: {action[1]}, kd_x: {action[2]}")
+            print(f"kp_z: {action[0]}, ki_z: {action[1]}, kd_z: {action[2]}, kp_vx: {action[3]}, ki_vx: {action[4]}, kd_vx: {action[5]}")
         
         return self._normalize_obs(self.state), reward, terminated, False, {}
 
@@ -190,10 +197,10 @@ if __name__ == "__main__":
                 policy_kwargs=dict(
                     net_arch=dict(pi=[256, 256], vf=[256, 256]),  # 缩小网络规模
                     activation_fn=torch.nn.ReLU),  # 添加tanh激活函数
-                learning_rate=1e-5,  # 降低学习率
+                learning_rate=6e-5,  # 降低学习率
                 clip_range=0.3,  # 使用默认PPO裁剪范围
                 max_grad_norm=0.7,  # 添加梯度裁剪
-                device='cpu',
+                device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
                 tensorboard_log=log_dir)  # 将TensorBoard日志路径添加到模型配置中
 
     # 训练模型
