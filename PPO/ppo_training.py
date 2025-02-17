@@ -8,8 +8,8 @@ import numpy as np
 from ppo import Actor, Critic, ReplayMemory, PPOAgent
 
 scenario = "Pendulum-v1"
-env = gym.make(scenario, render_mode="human")
-# env = gym.make(scenario)
+# env = gym.make(scenario, render_mode="human")
+env = gym.make(scenario)
 
 # Directory for saving trained models
 current_dir = os.path.dirname(os.path.realpath(__file__))

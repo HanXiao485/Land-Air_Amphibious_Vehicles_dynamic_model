@@ -101,13 +101,15 @@ class PPOAgent:
         self.replay_buffer = ReplayMemory(batch_size)
 
     def get_action(self, state):
+        # 
         state = torch.FloatTensor(state).unsqueeze(0).to(device)
         action = self.actor.select_action(state) 
         value = self.critic.forward(state)
 
-        return action.detach().cpu().numpy()[0] , value.detach().cpu().numpy()[0]
+        return action.detach().cpu().numpy()[0] , value.detach().cpu().numpy()[0]  # detach() to remove gradients
     
     def update(self):
+        self.old_actor.load_state_dict(self.actor.state_dict())
         # Update actor
         for epoch_i in range(self.EPOCH):
             memo_states, memo_actions, memo_rewards, memo_value, memo_dones, batches = self.replay_buffer.sample()
@@ -119,7 +121,8 @@ class PPOAgent:
                 discount = 1
                 a_t = 0
                 for k in range(t, T-1):
-                    a_t += memo_rewards[k] *self.GAMMA * memo_value[k+1] * (1-int(memo_dones[k])) - memo_value[k]
+                    # advantages
+                    a_t += (memo_rewards[k] + self.GAMMA * memo_value[k+1] * (1-int(memo_dones[k])) - memo_value[k]) * discount
                     discount *= self.GAMMA * self.LAMBDA
                 memo_advantages[t] = a_t
             
@@ -132,13 +135,13 @@ class PPOAgent:
 
             for batch in batches:
                 with torch.no_grad():
-                    old_mu, old_sigma = self.old_actor(memo_states_tensor[batch])
-                    old_pi = Normal(loc=old_mu, scale=old_sigma)
-                batch_old_probs_tensor = old_pi.log_prob(memo_actions_tensor[batch])
+                    old_mu, old_sigma = self.old_actor(memo_states_tensor[batch])  # 
+                    old_pi = Normal(loc=old_mu, scale=old_sigma)  # 
+                batch_old_probs_tensor = old_pi.log_prob(memo_actions_tensor[batch]) # return log probability of actions (old policy)
 
                 mu, sigma = self.actor(memo_states_tensor[batch])
                 pi = Normal(loc=mu, scale=sigma)
-                batch_probs_tensor = pi.log_prob(memo_actions_tensor[batch])
+                batch_probs_tensor = pi.log_prob(memo_actions_tensor[batch]) # return log probability of actions (new policy)
 
                 ratio = torch.exp(batch_probs_tensor - batch_old_probs_tensor)
 

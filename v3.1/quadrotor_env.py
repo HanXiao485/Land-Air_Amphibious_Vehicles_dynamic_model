@@ -2,7 +2,7 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 import torch
-from stable_baselines3 import PPO, SAC, TD3
+from stable_baselines3 import PPO, SAC, TD3, A2C
 from stable_baselines3.common.env_checker import check_env
 import matplotlib.pyplot as plt
 
@@ -191,6 +191,9 @@ if __name__ == "__main__":
     # 配置TensorBoard日志
     log_dir = "./tensorboard_logs/"
     
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+    
     model = PPO("MlpPolicy", env, verbose=1,
                 n_steps=512,
                 batch_size=128,
@@ -198,9 +201,9 @@ if __name__ == "__main__":
                     net_arch=dict(pi=[256, 256], vf=[256, 256]),  # 缩小网络规模
                     activation_fn=torch.nn.ReLU),  # 添加tanh激活函数
                 learning_rate=6e-5,  # 降低学习率
-                clip_range=0.3,  # 使用默认PPO裁剪范围
-                max_grad_norm=0.7,  # 添加梯度裁剪
-                device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+                clip_range=0.2,  # 使用默认PPO裁剪范围
+                max_grad_norm=0.5,  # 添加梯度裁剪
+                device = device,
                 tensorboard_log=log_dir)  # 将TensorBoard日志路径添加到模型配置中
 
     # 训练模型
