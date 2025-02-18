@@ -2,8 +2,9 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 import torch
-from stable_baselines3 import PPO, SAC, TD3, A2C
+from stable_baselines3 import PPO, SAC, TD3, A2C, DQN
 from stable_baselines3.common.env_checker import check_env
+from stable_baselines3.common.evaluation import evaluate_policy
 import matplotlib.pyplot as plt
 
 from drone_simulation import DroneSimulation
@@ -28,7 +29,7 @@ class QuadrotorEnv(gym.Env):
         # 动作空间：pid参数，z方向共6个
         self.action_space = spaces.Box(
             low=np.array([0.0]*6, dtype=np.int8),
-            high=np.array([10.0]*6, dtype=np.int8),
+            high=np.array([50.0]*6, dtype=np.int8),
             dtype=np.int8
         )
 
@@ -68,7 +69,8 @@ class QuadrotorEnv(gym.Env):
     def reset(self, seed=None, **kwargs):
         """重置环境状态"""
         self.np_random, seed = gym.utils.seeding.np_random(seed)
-        self.state = np.zeros(12)  # 初始状态为零
+        # self.state = np.zeros(12)  # 初始状态为零
+        self.state = np.array([0.0, 0.0, 50.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         self.done = False
         self.done_state = []
         self.reward_state = []
@@ -94,8 +96,8 @@ class QuadrotorEnv(gym.Env):
         u_f, tau_phi, tau_theta, tau_psi = self.pid_controller.update(
             current_time=self.t, state=self.state
         )
-        print("u_f: ", u_f, "tau_phi: ", tau_phi, "tau_theta: ", tau_theta, "tau_psi: ", tau_psi)
-        print("======================================================================================")
+        # print("u_f: ", u_f, "tau_phi: ", tau_phi, "tau_theta: ", tau_theta, "tau_psi: ", tau_psi)
+        # print("======================================================================================")
         
         # 获取PID控制器生成的期望值，一次update后生成一个期望值
         z_des_list = self.pid_controller.get_des_list()
@@ -124,9 +126,9 @@ class QuadrotorEnv(gym.Env):
         # 判断任务是否完成
         self.done_state.append(self.state[2])
         
-        if self.state[2] > 3000:
-            terminated = True
-        elif self.t > 2000:
+        # if self.state[2] > 4 or self.state[2] < 0.5:
+        #     terminated = True
+        if self.t > 2000:
             terminated = True
         else:
             terminated = False
@@ -138,7 +140,7 @@ class QuadrotorEnv(gym.Env):
             mean = np.mean(abs(np.array(state) - np.array(des_list)))
             var = np.var(np.array(state) - np.array(des_list), ddof=0)
             
-            reward = - mean - 0.01*var + current_time  
+            reward = - (mean + 0.01*var)**2
             
             return reward
         
@@ -150,10 +152,10 @@ class QuadrotorEnv(gym.Env):
         # reward = -abs(self.state[2] - 5) - 0.1 * np.sum(np.square(self.state[3:6])) - 0.1 * np.sum(np.square(self.state[6:9]))
         # print(f"Step: {self.step_count}, State: {self.state[3]}, force: {u_f}, Reward: {reward}")
         
-        if terminated:
-            # print(f"time: {current_time}, \n state_list: {np.array(self.state_list)}, \n des_list: {np.array(z_des_list)} \n ")
-            print(f"high: {self.reward_state[-1][-5:]}, \n force: {u_f} \n reward: {reward}")
-            print(f"kp_z: {action[0]}, ki_z: {action[1]}, kd_z: {action[2]}, kp_vx: {action[3]}, ki_vx: {action[4]}, kd_vx: {action[5]}")
+        # if terminated:
+        #     print(f"time: {current_time}, \ndes_list: {np.array(z_des_list)}")
+        #     print(f"high: {self.reward_state[-1][-5:]}, \nforce: {u_f} \nreward: {reward}")
+        #     print(f"kp_z: {action[0]}, ki_z: {action[1]}, kd_z: {action[2]}, kp_vx: {action[3]}, ki_vx: {action[4]}, kd_vx: {action[5]}")
         
         return self._normalize_obs(self.state), reward, terminated, False, {}
 
@@ -195,8 +197,8 @@ if __name__ == "__main__":
     print(f"Using device: {device}")
     
     model = PPO("MlpPolicy", env, verbose=1,
-                n_steps=512,
-                batch_size=128,
+                n_steps=2048,
+                batch_size=1024,
                 policy_kwargs=dict(
                     net_arch=dict(pi=[256, 256], vf=[256, 256]),  # 缩小网络规模
                     activation_fn=torch.nn.ReLU),  # 添加tanh激活函数
@@ -207,19 +209,28 @@ if __name__ == "__main__":
                 tensorboard_log=log_dir)  # 将TensorBoard日志路径添加到模型配置中
 
     # 训练模型
-    model.learn(total_timesteps=1e6)
+    model.learn(total_timesteps=2e6)
     
     # 保存训练后的模型
     model.save("quadrotor_model")
     
-    # 测试训练结果
-    obs, _ = env.reset()
-    for _ in range(500):
-        action, _ = model.predict(obs)
-        obs, _, done, _, _, = env.step(action)
-        if done:
-            break
-    print("Final position:", obs[:3])
+    model = PPO.load("quadrotor_model", env=env)
+    
+    mean_reward, std_reward = evaluate_policy(model, model.get_env(), n_eval_episodes=10)
+    
+    print(f"Mean reward: {mean_reward:.2f} +/- {std_reward:.2f}")
+    
+    env = model.get_env()
+    obs = env.reset()
+    
+    # # 测试训练结果
+    # obs = env.reset()
+    # for _ in range(500):
+    #     action, _ = model.predict(obs)
+    #     obs, reward, done, _, _ = env.step(action)
+    #     if done:
+    #         break
+    # print("reward:", reward)
     
 
 def register_quadrotor_env():
