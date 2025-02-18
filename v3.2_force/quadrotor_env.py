@@ -165,7 +165,7 @@ class QuadrotorEnv(gym.Env):
         
         # if terminated:
         #     print(f"time: {current_time}")
-        #     print(f"high: {self.reward_state[-1][:]}, \nforce: {u_f} \nreward: {reward}")
+        #     print(f"high: {self.reward_state[-1][-1]}, \nforce: {u_f} \nreward: {reward}")
         #     print(f"kp_z: {action[0]}, ki_z: {action[1]}, kd_z: {action[2]}, kp_vx: {action[3]}, ki_vx: {action[4]}, kd_vx: {action[5]}")
         
         return self._normalize_obs(self.state), reward, terminated, False, {}
