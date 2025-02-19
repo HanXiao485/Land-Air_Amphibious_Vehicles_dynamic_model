@@ -93,18 +93,12 @@ class QuadrotorEnv(gym.Env):
 
     def step(self, action):
         """根据动作更新环境状态"""
-        # self.pid_controller.set_pid_params(action)
-        
-        # # 使用PID控制器根据当前状态计算控制输入
-        # u_f, tau_phi, tau_theta, tau_psi = self.pid_controller.update(
-        #     current_time=self.t, state=self.state
-        # )
         
         u_f = action[0]
         # print("======================================================================================")
         
         # 获取PID控制器生成的期望值，一次update后生成一个期望值
-        self.z_des_list.append(self.curve.get_position(self.current_time)[2])
+        self.z_des_list.append(self.curve.get_position(self.current_time + 1)[2])
 
         # 将PID控制器生成的控制输入传递给四旋翼动力学模型
         forces = [u_f, 0, 0, 0]
@@ -145,37 +139,37 @@ class QuadrotorEnv(gym.Env):
             
             traget_error = des_list[-1] - state[-1]
             
-            reward = - (mean + 0.01*var)
+            reward = - np.abs(traget_error)
             
-            if traget_error > 0 and action[0] > 0:
-                reward += 500
-            elif traget_error < 0 and action[0] > 0:
-                reward -= 1000
+            if traget_error > 0 and action > 0:
+                reward += 50
+            elif traget_error < 0 and action > 0:
+                reward -= 100
             
             if terminated:
-                if current_time - self.t > 200 and mean < 3:
-                    reward += 1000
-                    print("good!!!, t>100")
+                if current_time - self.t > 200 and traget_error < 1:
+                    reward += 100
+                    print("good!!!, t>200")
                     print(f"state:{self.state_list[-5:]}")
                     print(f"z_des:{self.z_des_list[-5:]}")
                     print(f"reward: {reward}")
-                    print(f"mean: {mean}")
+                    print(f"traget_error: {traget_error}")
                     
-                    if current_time - self.t > 500 and mean < 2:
-                        reward += 5000
+                    if current_time - self.t > 500 and traget_error < 0.8:
+                        reward += 500
                         print("good!!!, t>500")
                         print(f"state:{self.state_list[-5:]}")
                         print(f"z_des:{self.z_des_list[-5:]}")
                         print(f"reward: {reward}")
-                        print(f"mean: {mean}")
+                        print(f"traget_error: {traget_error}")
                         
-                        if current_time - self.t > 1000 and mean < 1:
-                            reward += 10000
+                        if current_time - self.t > 1000 and traget_error < 0.5:
+                            reward += 1000
                             print("good!!!, t>1000")
                             print(f"state:{self.state_list[-5:]}")
                             print(f"z_des:{self.z_des_list[-5:]}")
                             print(f"reward: {reward}")
-                            print(f"mean: {mean}")
+                            print(f"traget_error: {traget_error}")
             
                 if self.state[2] < 20 or self.state[2] > 80:
                     reward -= 1000
@@ -236,8 +230,9 @@ if __name__ == "__main__":
     print(f"Using device: {device}")
     
     model = PPO("MlpPolicy", env, verbose=1,
-                n_steps=2048,
-                batch_size=1024,
+                n_steps=10000,
+                batch_size=4096,
+                n_epochs=50,
                 policy_kwargs=dict(
                     net_arch=dict(pi=[128, 128], vf=[128, 128]),   # 缩小网络规模
                     activation_fn=torch.nn.ReLU),  # 添加tanh激活函数
@@ -249,7 +244,7 @@ if __name__ == "__main__":
                 tensorboard_log=log_dir)  # 将TensorBoard日志路径添加到模型配置中
 
     # 训练模型
-    model.learn(total_timesteps=2e6,
+    model.learn(total_timesteps=4e6,
                 progress_bar=True)
     
     # 保存训练后的模型
