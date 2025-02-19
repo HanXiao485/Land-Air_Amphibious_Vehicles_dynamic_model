@@ -70,11 +70,13 @@ class QuadrotorEnv(gym.Env):
         """重置环境状态"""
         self.np_random, seed = gym.utils.seeding.np_random(seed)
         # self.state = np.zeros(12)  # 初始状态为零
-        self.state = np.array([0.0, 0.0, 50.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        self.t = np.random.randint(0, 2000)
+        self.current_time = self.t
+        h = self.curve.get_position(self.t)[2]
+        self.state = np.array([0.0, 0.0, h, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         self.done = False
         self.done_state = []
         self.reward_state = []
-        self.t = 0
         self.state_list = []
         self.z_des_list = []
         
@@ -102,7 +104,7 @@ class QuadrotorEnv(gym.Env):
         # print("======================================================================================")
         
         # 获取PID控制器生成的期望值，一次update后生成一个期望值
-        self.z_des_list.append(self.curve.get_position(self.t)[2])
+        self.z_des_list.append(self.curve.get_position(self.current_time)[2])
 
         # 将PID控制器生成的控制输入传递给四旋翼动力学模型
         forces = [u_f, 0, 0, 0]
@@ -129,37 +131,60 @@ class QuadrotorEnv(gym.Env):
         
         # if self.state[2] > 4 or self.state[2] < 0.5:
         #     terminated = True
-        if self.t > 2000:
+        if self.current_time > 2000:
             terminated = True
         elif self.state[2] < 20 or self.state[2] > 80:
             terminated = True
         else:
             terminated = False
             
-        
-        current_time = self.t
-        def reward_function(state, des_list, current_time):
+        def reward_function(state, des_list, action ,current_time):
             # 奖励函数：简单的惩罚当前位置越远
             mean = np.mean(abs(np.array(state) - np.array(des_list)))
             var = np.var(np.array(state) - np.array(des_list), ddof=0)
             
-            reward = - (mean + 0.01*var)
-            if mean < 1 and current_time == 2000:
-                reward += 1000
-                print("good!!!")
-                print(f"state:{self.reward_state}")
-                print(f"reward: {reward}")
+            traget_error = des_list[-1] - state[-1]
             
-            if self.state[2] < 20 or self.state[2] > 80:
+            reward = - (mean + 0.01*var)
+            
+            if traget_error > 0 and action[0] > 0:
+                reward += 500
+            elif traget_error < 0 and action[0] > 0:
                 reward -= 1000
-                
+            
+            if terminated:
+                if current_time - self.t > 200 and mean < 3:
+                    reward += 1000
+                    print("good!!!, t>100")
+                    print(f"state:{self.state_list[-5:]}")
+                    print(f"z_des:{self.z_des_list[-5:]}")
+                    print(f"reward: {reward}")
+                    print(f"mean: {mean}")
+                    
+                    if current_time - self.t > 500 and mean < 2:
+                        reward += 5000
+                        print("good!!!, t>500")
+                        print(f"state:{self.state_list[-5:]}")
+                        print(f"z_des:{self.z_des_list[-5:]}")
+                        print(f"reward: {reward}")
+                        print(f"mean: {mean}")
+                        
+                        if current_time - self.t > 1000 and mean < 1:
+                            reward += 10000
+                            print("good!!!, t>1000")
+                            print(f"state:{self.state_list[-5:]}")
+                            print(f"z_des:{self.z_des_list[-5:]}")
+                            print(f"reward: {reward}")
+                            print(f"mean: {mean}")
+            
+                if self.state[2] < 20 or self.state[2] > 80:
+                    reward -= 1000
+
             return reward
         
         # terminated = np.linalg.norm(self.state[0:3]) > 10  # 假设任务完成时超出10米
-        self.step_count += 1
-        self.t += 1
         
-        reward = reward_function(self.state_list, self.z_des_list, current_time)
+        reward = reward_function(self.state_list, self.z_des_list, u_f, self.current_time)
         # reward = -abs(self.state[2] - 5) - 0.1 * np.sum(np.square(self.state[3:6])) - 0.1 * np.sum(np.square(self.state[6:9]))
         # print(f"Step: {self.step_count}, State: {self.state[3]}, force: {u_f}, Reward: {reward}")
         
@@ -167,6 +192,9 @@ class QuadrotorEnv(gym.Env):
         #     print(f"time: {current_time}")
         #     print(f"high: {self.reward_state[-1][-1]}, \nforce: {u_f} \nreward: {reward}")
         #     print(f"kp_z: {action[0]}, ki_z: {action[1]}, kd_z: {action[2]}, kp_vx: {action[3]}, ki_vx: {action[4]}, kd_vx: {action[5]}")
+        
+        self.step_count += 1
+        self.current_time += 1
         
         return self._normalize_obs(self.state), reward, terminated, False, {}
 
@@ -211,7 +239,7 @@ if __name__ == "__main__":
                 n_steps=2048,
                 batch_size=1024,
                 policy_kwargs=dict(
-                    net_arch=dict(pi=[256, 256], vf=[256, 256]),  # 缩小网络规模
+                    net_arch=dict(pi=[128, 128], vf=[128, 128]),   # 缩小网络规模
                     activation_fn=torch.nn.ReLU),  # 添加tanh激活函数
                 learning_rate=3e-3,  # 降低学习率
                 use_sde=True,  # 使用Gaussian noise
@@ -221,7 +249,8 @@ if __name__ == "__main__":
                 tensorboard_log=log_dir)  # 将TensorBoard日志路径添加到模型配置中
 
     # 训练模型
-    model.learn(total_timesteps=2e6)
+    model.learn(total_timesteps=2e6,
+                progress_bar=True)
     
     # 保存训练后的模型
     model.save("quadrotor_model")
