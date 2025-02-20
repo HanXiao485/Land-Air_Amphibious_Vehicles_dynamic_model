@@ -5,6 +5,7 @@ import torch
 from stable_baselines3 import PPO, SAC, TD3, A2C, DQN
 from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.evaluation import evaluate_policy
+from stable_baselines3.common.vec_env import SubprocVecEnv
 import matplotlib.pyplot as plt
 
 from drone_simulation import DroneSimulation
@@ -18,13 +19,6 @@ from curve import Curve
 class QuadrotorEnv(gym.Env):
     def __init__(self, mass, inertia, drag_coeffs, gravity, pid_params):
         super(QuadrotorEnv, self).__init__()
-
-        # # 动作空间：pid参数，四环共36个
-        # self.action_space = spaces.Box(
-        #     low=np.array([0.1]*36),
-        #     high=np.array([6.0]*36),
-        #     dtype=np.float32
-        # )
         
         # 动作空间：参数，z方向共6个
         self.action_space = spaces.Box(
@@ -112,9 +106,6 @@ class QuadrotorEnv(gym.Env):
         # 上一个仿真时间段内，每一个时间步后的仿真结果
         self.state_list.append(self.state[:, 2][-1])
         
-        # # 判断加速度
-        # if self.t > 0:
-        #     print(f"error = {self.state_list[-1] - self.state_list[-2]}")
             
         # 获取新的状态,上一个仿真时间段内最后一个时间步的输出状态
         self.reward_state.append(self.state[:, 2])
@@ -123,8 +114,6 @@ class QuadrotorEnv(gym.Env):
         # 判断任务是否完成
         self.done_state.append(self.state[2])
         
-        # if self.state[2] > 4 or self.state[2] < 0.5:
-        #     terminated = True
         if self.current_time > 2000:
             terminated = True
         elif self.state[2] < 20 or self.state[2] > 80:
@@ -142,50 +131,13 @@ class QuadrotorEnv(gym.Env):
             reward = - np.abs(traget_error)
             
             if traget_error > 0 and action > 0:
-                reward += 50
+                reward += 0
             elif traget_error < 0 and action > 0:
                 reward -= 100
-            
-            if terminated:
-                if current_time - self.t > 200 and traget_error < 1:
-                    reward += 100
-                    print("good!!!, t>200")
-                    print(f"state:{self.state_list[-5:]}")
-                    print(f"z_des:{self.z_des_list[-5:]}")
-                    print(f"reward: {reward}")
-                    print(f"traget_error: {traget_error}")
-                    
-                    if current_time - self.t > 500 and traget_error < 0.8:
-                        reward += 500
-                        print("good!!!, t>500")
-                        print(f"state:{self.state_list[-5:]}")
-                        print(f"z_des:{self.z_des_list[-5:]}")
-                        print(f"reward: {reward}")
-                        print(f"traget_error: {traget_error}")
-                        
-                        if current_time - self.t > 1000 and traget_error < 0.5:
-                            reward += 1000
-                            print("good!!!, t>1000")
-                            print(f"state:{self.state_list[-5:]}")
-                            print(f"z_des:{self.z_des_list[-5:]}")
-                            print(f"reward: {reward}")
-                            print(f"traget_error: {traget_error}")
-            
-                if self.state[2] < 20 or self.state[2] > 80:
-                    reward -= 1000
 
             return reward
         
-        # terminated = np.linalg.norm(self.state[0:3]) > 10  # 假设任务完成时超出10米
-        
         reward = reward_function(self.state_list, self.z_des_list, u_f, self.current_time)
-        # reward = -abs(self.state[2] - 5) - 0.1 * np.sum(np.square(self.state[3:6])) - 0.1 * np.sum(np.square(self.state[6:9]))
-        # print(f"Step: {self.step_count}, State: {self.state[3]}, force: {u_f}, Reward: {reward}")
-        
-        # if terminated:
-        #     print(f"time: {current_time}")
-        #     print(f"high: {self.reward_state[-1][-1]}, \nforce: {u_f} \nreward: {reward}")
-        #     print(f"kp_z: {action[0]}, ki_z: {action[1]}, kd_z: {action[2]}, kp_vx: {action[3]}, ki_vx: {action[4]}, kd_vx: {action[5]}")
         
         self.step_count += 1
         self.current_time += 1
@@ -194,7 +146,6 @@ class QuadrotorEnv(gym.Env):
 
     def render(self):
         """渲染环境状态"""
-        # print(f"Step: {self.step_count}, State: {self.state}")
 
     def close(self):
         """关闭环境"""
@@ -204,39 +155,48 @@ class QuadrotorEnv(gym.Env):
 
 # 使用PID控制器与四旋翼仿真环境结合
 if __name__ == "__main__":
-    # PID控制器的参数
-    pid_params = {
-        'mass': 3.18,
-        'gravity': 9.81,
-        'desired_position': [0, 0, 5],  # 目标位置
-        'desired_velocity': [0, 0, 0],   # 目标速度
-        'desired_attitude': [0, 0, 0],   # 目标姿态
-        'dt': 0.1
-    }
+   # 创建多个环境实例
+    def make_env():
+        def _init():
+            pid_params = {
+                'mass': 3.18,
+                'gravity': 9.81,
+                'desired_position': [0, 0, 5],  # 目标位置
+                'desired_velocity': [0, 0, 0],   # 目标速度
+                'desired_attitude': [0, 0, 0],   # 目标姿态
+                'dt': 0.1
+            }
 
-    # 初始化四旋翼环境
-    env = QuadrotorEnv(
-        mass=3.18,
-        inertia=[0.029618, 0.069585, 0.042503],  # 假设惯性矩阵
-        drag_coeffs=[0.0, 0.0],      # 假设阻力系数
-        gravity=9.81,                 # 重力加速度
-        pid_params=pid_params  # 将PID控制器的参数传递给环境
-    )
+            env = QuadrotorEnv(
+                mass=3.18,
+                inertia=[0.029618, 0.069585, 0.042503],  # 假设惯性矩阵
+                drag_coeffs=[0.0, 0.0],      # 假设阻力系数
+                gravity=9.81,                 # 重力加速度
+                pid_params=pid_params  # 将PID控制器的参数传递给环境
+            )
+            return env
+        return _init
+
+    # 创建多环境
+    num_envs = 1  # 设置需要的环境数量
+    env = SubprocVecEnv([make_env() for _ in range(num_envs)])
 
     # 配置TensorBoard日志
     log_dir = "./tensorboard_logs/"
+    # log_dir = None
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     
     model = PPO("MlpPolicy", env, verbose=1,
-                n_steps=10000,
-                batch_size=4096,
-                n_epochs=50,
+                n_steps=4096,
+                batch_size=2048,
+                n_epochs=20,
+                ent_coef=0.01,
                 policy_kwargs=dict(
-                    net_arch=dict(pi=[128, 128], vf=[128, 128]),   # 缩小网络规模
+                    net_arch=dict(pi=[256, 256, 256, 256], vf=[256, 256, 256, 256]),   # 缩小网络规模
                     activation_fn=torch.nn.ReLU),  # 添加tanh激活函数
-                learning_rate=3e-3,  # 降低学习率
+                learning_rate=1e-5,  # 降低学习率
                 use_sde=True,  # 使用Gaussian noise
                 clip_range=0.2,  # 使用默认PPO裁剪范围
                 max_grad_norm=0.5,  # 添加梯度裁剪
@@ -244,7 +204,7 @@ if __name__ == "__main__":
                 tensorboard_log=log_dir)  # 将TensorBoard日志路径添加到模型配置中
 
     # 训练模型
-    model.learn(total_timesteps=4e6,
+    model.learn(total_timesteps=1e7,
                 progress_bar=True)
     
     # 保存训练后的模型
