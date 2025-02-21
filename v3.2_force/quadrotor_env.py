@@ -22,8 +22,8 @@ class QuadrotorEnv(gym.Env):
         
         # 动作空间：参数，z方向共6个
         self.action_space = spaces.Box(
-            low=np.array([0.0]*1, dtype=np.float32),
-            high=np.array([200.0]*1, dtype=np.float32),
+            low=np.array([0, -50, -50, -50], dtype=np.float32),
+            high=np.array([200, 50, 50, 50], dtype=np.float32),
             dtype=np.float32
         )
 
@@ -88,14 +88,14 @@ class QuadrotorEnv(gym.Env):
     def step(self, action):
         """根据动作更新环境状态"""
         
-        u_f = action[0]
+        u_f, tau_phi, tau_theta, tau_psi = action[0], action[1], action[2], action[3]
         # print("======================================================================================")
         
         # 获取PID控制器生成的期望值，一次update后生成一个期望值
         self.z_des_list.append(self.curve.get_position(self.current_time + 1)[2])
 
         # 将PID控制器生成的控制输入传递给四旋翼动力学模型
-        forces = [u_f, 0, 0, 0]
+        forces = [u_f, tau_phi, tau_theta, tau_psi]
         state = self.state
 
         # 使用RK4积分器计算状态更新
