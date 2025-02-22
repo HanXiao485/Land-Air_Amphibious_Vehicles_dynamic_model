@@ -16,8 +16,8 @@ class Curve:
         # using linear interpolation
         x = self.a * np.sin(self.w * t + self.c)
         y = self.b * np.cos(self.w * t + self.d)
-        # z = self.e * t
-        z = 10 * np.sin(0.01 * t) + 50
+        z = t
+        # z = 10 * np.sin(0.01 * t) + 50
         return x, y, z
     
     def plot_curve(self, num_points=100):

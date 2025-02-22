@@ -5,6 +5,7 @@ import torch
 from stable_baselines3 import PPO, SAC, TD3, A2C, DQN
 from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.evaluation import evaluate_policy
+from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
 import matplotlib.pyplot as plt
 
 from drone_simulation import DroneSimulation
@@ -78,14 +79,14 @@ class QuadrotorEnv(gym.Env):
         self.state_list = []
         
         self.curve = Curve(a=0.0, b=0.0, c=0.0, d=0.0, e=1.0, w=0.0)
-        self.pid_controller = DualLoopPIDController(
-            mass=pid_params['mass'],
-            gravity=pid_params['gravity'],
-            desired_position = self.curve,
-            desired_velocity=pid_params['desired_velocity'],
-            desired_attitude=pid_params['desired_attitude'],
-            dt=pid_params['dt']
-        )
+        # self.pid_controller = DualLoopPIDController(
+        #     mass=pid_params['mass'],
+        #     gravity=pid_params['gravity'],
+        #     desired_position = self.curve,
+        #     desired_velocity=pid_params['desired_velocity'],
+        #     desired_attitude=pid_params['desired_attitude'],
+        #     dt=pid_params['dt']
+        # )
         return self.state, {}
 
     def step(self, action):
@@ -171,24 +172,50 @@ class QuadrotorEnv(gym.Env):
 
 # 使用PID控制器与四旋翼仿真环境结合
 if __name__ == "__main__":
-    # PID控制器的参数
-    pid_params = {
-        'mass': 3.18,
-        'gravity': 9.81,
-        'desired_position': [0, 0, 5],  # 目标位置
-        'desired_velocity': [0, 0, 0],   # 目标速度
-        'desired_attitude': [0, 0, 0],   # 目标姿态
-        'dt': 0.1
-    }
+    # # PID控制器的参数
+    # pid_params = {
+    #     'mass': 3.18,
+    #     'gravity': 9.81,
+    #     'desired_position': [0, 0, 5],  # 目标位置
+    #     'desired_velocity': [0, 0, 0],   # 目标速度
+    #     'desired_attitude': [0, 0, 0],   # 目标姿态
+    #     'dt': 0.1
+    # }
 
-    # 初始化四旋翼环境
-    env = QuadrotorEnv(
-        mass=3.18,
-        inertia=[0.029618, 0.069585, 0.042503],  # 假设惯性矩阵
-        drag_coeffs=[0.0, 0.0],      # 假设阻力系数
-        gravity=9.81,                 # 重力加速度
-        pid_params=pid_params  # 将PID控制器的参数传递给环境
-    )
+    # # 初始化四旋翼环境
+    # env = QuadrotorEnv(
+    #     mass=3.18,
+    #     inertia=[0.029618, 0.069585, 0.042503],  # 假设惯性矩阵
+    #     drag_coeffs=[0.0, 0.0],      # 假设阻力系数
+    #     gravity=9.81,                 # 重力加速度
+    #     pid_params=pid_params  # 将PID控制器的参数传递给环境
+    # )
+    
+    # 创建多个环境实例
+    def make_env():
+        def _init():
+            pid_params = {
+                'mass': 3.18,
+                'gravity': 9.81,
+                'desired_position': [0, 0, 5],  # 目标位置
+                'desired_velocity': [0, 0, 0],   # 目标速度
+                'desired_attitude': [0, 0, 0],   # 目标姿态
+                'dt': 0.1
+            }
+
+            env = QuadrotorEnv(
+                mass=3.18,
+                inertia=[0.029618, 0.069585, 0.042503],  # 假设惯性矩阵
+                drag_coeffs=[0.0, 0.0],      # 假设阻力系数
+                gravity=9.81,                 # 重力加速度
+                pid_params=pid_params  # 将PID控制器的参数传递给环境
+            )
+            return env
+        return _init
+    
+    # 创建多环境
+    num_envs = 1  # 设置需要的环境数量
+    env = DummyVecEnv([make_env() for _ in range(num_envs)])
 
     # 配置TensorBoard日志
     log_dir = "./tensorboard_logs/"
