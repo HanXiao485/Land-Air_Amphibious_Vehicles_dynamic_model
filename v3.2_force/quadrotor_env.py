@@ -1,4 +1,5 @@
 import logging
+import csv
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
@@ -18,10 +19,27 @@ from curve import Curve
 
 from tensorboardX import SummaryWriter  # 用于TensorBoard记录
 
+# 设置 logging 配置
+logging.basicConfig(
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    level=logging.INFO,  # 记录信息级别为 INFO，可以改为 DEBUG 以记录更多信息
+    handlers=[
+        logging.StreamHandler(),  # 输出到控制台
+        logging.FileHandler("training_log.txt")  # 输出到文件
+    ]
+)
+logger = logging.getLogger()
 
 class QuadrotorEnv(gym.Env):
     def __init__(self, mass, inertia, drag_coeffs, gravity, pid_params):
         super(QuadrotorEnv, self).__init__()
+        
+        # 打开 CSV 文件并写入表头（如果文件不存在）
+        self.csv_file = open("rewards.csv", mode="w", newline="")
+        self.csv_writer = csv.writer(self.csv_file)
+
+        # 写入表头
+        self.csv_writer.writerow(['TimeStep', 'Reward'])
         
         # 动作空间：参数，z方向共6个
         self.action_space = spaces.Box(
@@ -77,6 +95,8 @@ class QuadrotorEnv(gym.Env):
         self.state_list = []
         self.des_list = []
         self.vel_list = np.array([0.0, 0.0, 0.0])
+        self.att_list = np.array([0.0, 0.0, 0.0])
+        self.n_steps = 64
         
         return self.state, {}
 
@@ -107,50 +127,65 @@ class QuadrotorEnv(gym.Env):
         # 获取新的状态,上一个仿真时间段内最后一个时间步的输出状态 1*12
         self.state = self.state[-1]
         # self.state_end = self.state[-1]
+            
+            
+        # def reward_function(state, des_list, vel_list, action ,current_time):
+        #     # 奖励函数：简单的惩罚当前位置越远
+        #     # mean = np.mean(abs(np.array(state) - np.array(des_list)))
+        #     # var = np.var(np.array(state) - np.array(des_list), ddof=0)
+            
+        #     dis_error = np.linalg.norm(des_list[-1] - state[-1][0:3])  # x,y,z 1*3
+        #     ang_error = np.linalg.norm(vel_list[-1] - state[-1][6:9])  # vx,vy,vz 1*3
+        #     x_error = des_list[-1][0] - state[-1][0]
+        #     y_error = des_list[-1][1] - state[-1][1]
+        #     z_error = des_list[-1][2] - state[-1][2]
+            
+        #     reward = - ( 0.01 * dis_error + ang_error )
+            
+        #     # if traget_error > 0 and action > 0:
+        #     #     reward += 0
+        #     # elif traget_error < 0 and action > 0:
+        #     #     reward -= 100
 
-        # 判断任务是否完成
-        self.done_state.append(self.state[0:3])
+        #     return reward
         
-        if self.current_time > 2000:
-            terminated = True
-        elif self.state[2] < 20 or self.state[2] > 80:
-            terminated = True
-        else:
-            terminated = False
-            
-            
-        def reward_function(state, des_list, vel_list, action ,current_time):
-            # 奖励函数：简单的惩罚当前位置越远
-            # mean = np.mean(abs(np.array(state) - np.array(des_list)))
-            # var = np.var(np.array(state) - np.array(des_list), ddof=0)
+        def reward_function(state, des_list, vel_list, att_list, action ,current_time):
             
             dis_error = np.linalg.norm(des_list[-1] - state[-1][0:3])  # x,y,z 1*3
-            ang_error = np.linalg.norm(vel_list[-1] - state[-1][6:9])  # vx,vy,vz 1*3
-            x_error = des_list[-1][0] - state[-1][0]
-            y_error = des_list[-1][1] - state[-1][1]
-            z_error = des_list[-1][2] - state[-1][2]
+            vel_error = np.linalg.norm(vel_list[-1] - state[-1][6:9])  # vx,vy,vz 1*3
             
-            reward = - ( 0.01 * dis_error + ang_error )
+            phi_error = np.linalg.norm(att_list[0] - state[-1][6])
+            theta_error = np.linalg.norm(att_list[1] - state[-1][7])
             
-            # if traget_error > 0 and action > 0:
-            #     reward += 0
-            # elif traget_error < 0 and action > 0:
-            #     reward -= 100
-
-            return reward
+            r_pose = np.exp(-dis_error * 1.2)
+            r_phi = 0.5 / (1 + np.square(phi_error))
+            r_theta = 0.5 / (1 + np.square(theta_error))
+            
+            reward = r_pose + r_pose * (r_phi + r_theta)
+            
+            done =  (current_time >= 2000) | (dis_error > 0.5)
+            
+            return reward, done
         
-        reward = reward_function(self.state_list, self.des_list, self.vel_list, u_f, self.current_time)
+        reward, done = reward_function(self.state_list, self.des_list, self.vel_list, self.att_list, u_f, self.current_time)
+        
+        # 记录奖励和时间步
+        self.csv_writer.writerow([self.current_time, reward])
+        
+        if self.current_time % self.n_steps == 0:
+            logger.info(f"Step: {self.current_time}, Average reward: {reward:.2f}")
         
         self.step_count += 1
         self.current_time += 1
         
-        return self._normalize_obs(self.state), reward, terminated, False, {}
+        return self._normalize_obs(self.state), reward, done, False, {}
 
     def render(self):
         """渲染环境状态"""
 
     def close(self):
         """关闭环境"""
+        self.csv_file.close()
         pass
     
 
@@ -210,17 +245,18 @@ if __name__ == "__main__":
     print(f"Using device: {device}")
     
     model = PPO("MlpPolicy", env, verbose=1,
-                n_steps=4,
-                batch_size=4,
-                n_epochs=20,
-                ent_coef=0.01,
+                n_steps=64,
+                batch_size=16,
+                n_epochs=10,
+                gamma=0.995,
+                ent_coef=0.001,
                 policy_kwargs=dict(
-                    net_arch=dict(pi=[256, 256, 256, 256], vf=[256, 256, 256, 256]),   # 缩小网络规模
+                    net_arch=dict(pi=[256, 128], vf=[256, 128]),   # 缩小网络规模
                     activation_fn=torch.nn.ReLU),  # 添加tanh激活函数
-                learning_rate=1e-5,  # 降低学习率
+                learning_rate=5e-4,  # 降低学习率
                 use_sde=True,  # 使用Gaussian noise
                 clip_range=0.2,  # 使用默认PPO裁剪范围
-                max_grad_norm=0.5,  # 添加梯度裁剪
+                max_grad_norm=10.0,  # 添加梯度裁剪
                 device = device,
                 tensorboard_log=log_dir)  # 将TensorBoard日志路径添加到模型配置中
     
