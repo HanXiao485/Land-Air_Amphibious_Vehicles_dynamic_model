@@ -30,7 +30,7 @@ REWARD_BUFFER = np.empty(shape = NUM_EPISODE)
 best_reward = -2000
 
 for episode_i in range(NUM_EPISODE):
-    state,others = env.reset()
+    state = env.reset()
     done = False
     episode_reward = 0
 
