@@ -95,7 +95,7 @@ class QuadrotorEnv(gym.Env):
         """重置环境状态"""
         self.np_random, seed = gym.utils.seeding.np_random(seed)
         # self.state = np.zeros(12)  # 初始状态为零
-        self.t = np.random.randint(0, 2000)
+        self.t = 0
         self.current_time = self.t
         x, y, z = self.curve.get_position(self.t)[0], self.curve.get_position(self.t)[1], self.curve.get_position(self.t)[2]
         self.state = np.array([x, y, z, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -154,7 +154,7 @@ class QuadrotorEnv(gym.Env):
             
             reward = r_pose + r_pose * (r_phi + r_theta)
             
-            done =  (current_time >= 2000) | (dis_error > 3)
+            done =  (current_time >= 2000) | (dis_error > 5)
             
             return reward, done
         
