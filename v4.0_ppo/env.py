@@ -29,7 +29,7 @@ logging.basicConfig(
     level=logging.INFO,  # 记录信息级别为 INFO，可以改为 DEBUG 以记录更多信息
     handlers=[
         logging.StreamHandler(),  # 输出到控制台
-        logging.FileHandler("training_log.txt")  # 输出到文件
+        logging.FileHandler("./training_log.txt")  # 输出到文件
     ]
 )
 logger = logging.getLogger()
@@ -39,11 +39,17 @@ class QuadrotorEnv(gym.Env):
         super(QuadrotorEnv, self).__init__()
         
         # 打开 CSV 文件并写入表头（如果文件不存在）
-        self.csv_file = open("rewards.csv", mode="w", newline="")
+        self.csv_file = open("./rewards.csv", mode="w", newline="")
         self.csv_writer = csv.writer(self.csv_file)
 
         # 写入表头
         self.csv_writer.writerow(['TimeStep', 'Reward'])
+        
+        # 打开一个新的 CSV 文件用于保存仿真数据
+        self.simulation_data_file = open("./simulation_data.csv", mode="w", newline="")
+        self.simulation_data_writer = csv.writer(self.simulation_data_file)
+        # 写入表头（假设期望位置有3个维度，观测值有12个维度）
+        self.simulation_data_writer.writerow(['TimeStep', 'Desired_x', 'Desired_y', 'Desired_z', 'state_x', 'state_y', 'state_z', 'vel_x', 'vel_y', 'vel_z', 'ang_x', 'ang_y', 'ang_z', 'p', 'q', 'r'])
         
         # 动作空间：参数，z方向共6个
         self.action_space = spaces.Box(
@@ -59,7 +65,7 @@ class QuadrotorEnv(gym.Env):
             dtype=np.float32
         )
         
-        self.curve = Curve(a=1.0, b=1.0, c=0.0, d=0.0, e=1.0, w=1.0)
+        self.curve = Curve(a=10.0, b=10.0, c=0.0, d=0.0, e=1.0, w=1.0)
 
         # # 初始化PID控制器和四旋翼动力学模型
         # self.pid_controller = DualLoopPIDController(
@@ -112,6 +118,8 @@ class QuadrotorEnv(gym.Env):
         
         # 获取PID控制器生成的期望值，一次update后生成一个期望值
         self.des_list.append(self.curve.get_position(self.current_time + 1))
+        
+        des_position = self.des_list[-1]  # 期望位置
 
         # 将PID控制器生成的控制输入传递给四旋翼动力学模型
         forces = [u_f, tau_phi, tau_theta, tau_psi]
@@ -146,7 +154,7 @@ class QuadrotorEnv(gym.Env):
             
             reward = r_pose + r_pose * (r_phi + r_theta)
             
-            done =  (current_time >= 2000) | (dis_error > 0.5)
+            done =  (current_time >= 2000) | (dis_error > 3)
             
             return reward, done
         
@@ -155,13 +163,18 @@ class QuadrotorEnv(gym.Env):
         # 记录奖励和时间步
         self.csv_writer.writerow([self.current_time, reward])
         
-        if self.current_time % self.n_steps == 0:
-            logger.info(f"Step: {self.current_time}, Average reward: {reward:.8f}")
+        # # 获取归一化后的观测值并保存到文件
+        # new_obs = self._normalize_obs(self.state)
+        # 写入仿真数据到 CSV 文件
+        self.simulation_data_writer.writerow([self.current_time, des_position[0], des_position[1], des_position[2]] + list(self.state))
+        
+        # if self.current_time % self.n_steps == 0:
+        #     logger.info(f"Step: {self.current_time}, Average reward: {reward:.8f}")
         
         self.step_count += 1
         self.current_time += 1
         
-        return self._normalize_obs(self.state), reward, done, False, {}
+        return self.state, reward, done, False, {}
         
 
     def render(self):
@@ -224,8 +237,8 @@ if __name__ == "__main__":
     model = current_dir + "/models/"
     timestamp = time.strftime("%Y%m%d-%H%M%S")
     
-    NUM_EPISODE = 3000
-    NUM_STEP = 200
+    NUM_EPISODE = 10000
+    NUM_STEP = 500
     STATE_DIM = env.observation_space.shape[0]
     ACTION_DIM = env.action_space.shape[0]
     # ACTION_DIM = env.action_space.n
@@ -253,9 +266,12 @@ if __name__ == "__main__":
             action, value = agent.get_action(state)
             next_state, reward, done, _, _ = env.step(action)
             episode_reward += reward
-            done = True if (step_i + 1) == NUM_STEP else False
+            # done = True if (step_i + 1) == NUM_STEP else False
             agent.replay_buffer.add_memory(state, action, reward, value, done)
-            state = next_state
+            if done:
+                state = env.reset()[0]
+            else:
+                state = next_state
             
             if (step_i + 1) % BATCH_SIZE == 0 or (step_i + 1) == NUM_STEP:
                 agent.update()

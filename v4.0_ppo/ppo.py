@@ -8,12 +8,12 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"computing device:{device}")
 
 class Actor(nn.Module):
-    def __init__(self, state_dim, action_dim, hidden_dim=256):
+    def __init__(self, state_dim, action_dim, hidden_dim1=256, hidden_dim2=128):
         super(Actor, self).__init__()
-        self.fc1 = nn.Linear(state_dim, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.fc_mean = nn.Linear(hidden_dim, action_dim)
-        self.fc_std = nn.Linear(hidden_dim, action_dim)
+        self.fc1 = nn.Linear(state_dim, hidden_dim1)
+        self.fc2 = nn.Linear(hidden_dim1, hidden_dim2)
+        self.fc_mean = nn.Linear(hidden_dim2, action_dim)
+        self.fc_std = nn.Linear(hidden_dim2, action_dim)
         self.relu = nn.ReLU()
         self.tanh = nn.Tanh()
         self.softplus = nn.Softplus()
@@ -36,11 +36,11 @@ class Actor(nn.Module):
         return action
         
 class Critic(nn.Module):
-    def __init__(self, state_dim, hidden_dim=256):
+    def __init__(self, state_dim, hidden_dim1=256, hidden_dim2=128):
         super(Critic, self).__init__()
-        self.fc1 = nn.Linear(state_dim, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.fc3 = nn.Linear(hidden_dim, 1)
+        self.fc1 = nn.Linear(state_dim, hidden_dim1)
+        self.fc2 = nn.Linear(hidden_dim1, hidden_dim2)
+        self.fc3 = nn.Linear(hidden_dim2, 1)
         self.relu = nn.ReLU()
 
     def forward(self, x):
