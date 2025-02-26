@@ -86,8 +86,8 @@ class PPOAgent:
     def __init__(self, state_dim, action_dim, batch_size):
         # self.LR_ACTOR = 3e-4
         # self.LR_CRITIC = 1e-3
-        self.LR_ACTOR = 3e-3
-        self.LR_CRITIC = 1e-2
+        self.LR_ACTOR = 5e-3
+        self.LR_CRITIC = 5e-2
         self.GAMMA = 0.99
         self.LAMBDA = 0.95 
         self.EPOCH = 10

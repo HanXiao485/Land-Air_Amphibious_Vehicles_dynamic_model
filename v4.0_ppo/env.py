@@ -65,7 +65,7 @@ class QuadrotorEnv(gym.Env):
             dtype=np.float32
         )
         
-        self.curve = Curve(a=10.0, b=10.0, c=0.0, d=0.0, e=1.0, w=1.0)
+        self.curve = Curve(a=0.0, b=0.0, c=0.0, d=0.0, e=0.0, w=1.0)
 
         # # 初始化PID控制器和四旋翼动力学模型
         # self.pid_controller = DualLoopPIDController(
@@ -121,9 +121,13 @@ class QuadrotorEnv(gym.Env):
         
         des_position = self.des_list[-1]  # 期望位置
 
+        if u_f < 31.5:
+            u_f = 31.5
+            
         # 将PID控制器生成的控制输入传递给四旋翼动力学模型
-        forces = [u_f, tau_phi, tau_theta, tau_psi]
-        
+        # forces = [u_f, tau_phi, tau_theta, tau_psi]
+        forces = [u_f, 0, 0, 0]
+        print("forces",int(u_f))
         
         state = self.state
 
@@ -264,6 +268,9 @@ if __name__ == "__main__":
 
         for step_i in range(NUM_STEP):
             action, value = agent.get_action(state)
+            force, torque_x, torque_y, torque_z = action
+            force = np.abs(force)
+            action = np.array([force, torque_x, torque_y, torque_z])
             next_state, reward, done, _, _ = env.step(action)
             episode_reward += reward
             # done = True if (step_i + 1) == NUM_STEP else False

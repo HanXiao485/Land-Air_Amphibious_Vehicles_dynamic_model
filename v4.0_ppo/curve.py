@@ -16,7 +16,7 @@ class Curve:
         # using linear interpolation
         x = self.a * np.sin(self.w * t + self.c)
         y = self.b * np.cos(self.w * t + self.d)
-        z = t
+        z = 0.1 * t
         # z = 10 * np.sin(0.01 * t) + 50
         return x, y, z
     
