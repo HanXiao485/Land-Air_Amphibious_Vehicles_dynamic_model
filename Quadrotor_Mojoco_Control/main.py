@@ -85,7 +85,7 @@ def calc_motor_input(krpm):
 # 加载模型回调函数
 def load_callback(m=None, d=None):
     mujoco.set_mjcb_control(None)
-    m = mujoco.MjModel.from_xml_path('E:\Land-Air_Amphibious_Vehicles_dynamic_model\Quadrotor_SE3_Control\crazyfile\scene.xml')
+    m = mujoco.MjModel.from_xml_path('E:\Land-Air_Amphibious_Vehicles_dynamic_model\Quadrotor_Mojoco_Control\crazyfile\scene.xml')
     d = mujoco.MjData(m)
     # contact
     mujoco.mj_forward(m, d)
@@ -131,7 +131,7 @@ def reset_environment(m, d):
     d.qacc[:3] = np.array([0.0, 0.0, 0.0])  # 设置加速度
     # 如果你使用的是控制器，你可以重新设置控制器的参数
     # 例如，重新初始化控制器的参数
-    
+
     # 更新模型状态和传感器数据
     mujoco.mj_forward(m, d)
 
@@ -353,7 +353,7 @@ def control_callback(m, d):
     step_i += 1
     # if log_count >= 500:
     #     log_count = 0
-    #     # 这里输出log
+    
     #     # print(f"Control Linear: X:{ctrl_linear[0]:.2f} Y:{ctrl_linear[1]:.2f} Z:{ctrl_linear[2]:.2f}")
     #     print(f"Quat: x:{quat[0]:.2f} y:{quat[1]:.2f} z:{quat[2]:.2f} w:{quat[3]:.2f}")
     #     print(f"Control Angular: X:{ctrl_torque[0]:.2f} Y:{ctrl_torque[1]:.2f} Z:{ctrl_torque[2]:.2f}")
