@@ -139,7 +139,7 @@ class PPOAgent:
             for batch in batches:
                 with torch.no_grad():
                     old_mu, old_sigma = self.old_actor(memo_states_tensor[batch])  # 
-                    # 检查并替换 NaN 值
+                    # 
                     old_mu = torch.where(torch.isnan(old_mu), torch.zeros_like(old_mu), old_mu)
                     old_sigma = torch.where(torch.isnan(old_sigma), torch.ones_like(old_sigma), old_sigma)
                     old_pi = Normal(loc=old_mu, scale=old_sigma)  # 
@@ -147,7 +147,7 @@ class PPOAgent:
 
                 mu, sigma = self.actor(memo_states_tensor[batch])
                 
-                # 检查并替换 NaN 值
+                # NaN
                 mu = torch.where(torch.isnan(mu), torch.zeros_like(mu), mu)
                 sigma = torch.where(torch.isnan(sigma), torch.ones_like(sigma), sigma)
                 
